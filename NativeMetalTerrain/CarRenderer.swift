@@ -212,7 +212,6 @@ final class CarRenderer {
     // MARK: State
 
     private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue
     private var pipeline: MTLRenderPipelineState?
     private var depthState: MTLDepthStencilState?
     private var reflectionSampler: MTLSamplerState?
@@ -237,8 +236,6 @@ final class CarRenderer {
 
     init?(device: MTLDevice) {
         self.device = device
-        guard let q = device.makeCommandQueue() else { return nil }
-        self.commandQueue = q
         buildMeshes()
         buildPipeline()
         buildReflectionResources()
@@ -358,36 +355,27 @@ final class CarRenderer {
 
     // MARK: Draw
 
-    /// Draws the car over the current frame. Call AFTER `renderer.draw(in:)`.
+    /// Draws the car into an existing render encoder (called from the
+    /// library's draw overlay closure). This avoids the synchronization
+    /// issues of a second render pass — the car draws in the SAME encoder
+    /// as the terrain, right after it.
     /// - Parameters:
+    ///   - encoder: The active render encoder (from the library's draw).
     ///   - viewProj: view-projection matrix matching the terrain pass.
     ///   - cameraPos: camera world position (for specular/reflections).
     ///   - sunAzimuth/sunElevation: degrees, matching the renderer's sun.
     ///   - carModel: car world transform (slope-aligned).
     ///   - wheelSpin: wheel rotation about the axle (radians).
     ///   - steer: -1...1 steering input.
-    ///   - reflectionTex: live scene reflection for the mirrors (from
-    ///     `MTTerrainRenderer.renderReflection`). Nil = mirrors show sky color.
-    func draw(in view: MTKView,
+    ///   - reflectionTex: live scene reflection for the mirrors.
+    func draw(encoder enc: MTLRenderCommandEncoder,
               viewProj: simd_float4x4,
               cameraPos: SIMD3<Float>,
               sunAzimuth: Float, sunElevation: Float,
               carModel: simd_float4x4,
               wheelSpin: Float, steer: Float,
               reflectionTex: MTLTexture? = nil) {
-        guard let pipeline, let depthState,
-              view.currentDrawable != nil else { return }
-        // Preserve the terrain pass: load color + depth instead of clearing.
-        // (Load actions must be set on the descriptor BEFORE the encoder
-        // is created.)
-        guard let pass = view.currentRenderPassDescriptor else { return }
-        pass.colorAttachments[0].loadAction = .load
-        pass.colorAttachments[0].storeAction = .store
-        pass.depthAttachment.loadAction = .load
-        pass.depthAttachment.storeAction = .store
-        guard let cb = commandQueue.makeCommandBuffer(),
-              let enc = cb.makeRenderCommandEncoder(descriptor: pass)
-        else { return }
+        guard let pipeline, let depthState else { return }
 
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
@@ -433,11 +421,8 @@ final class CarRenderer {
                                       indexType: MTLIndexType.uint32,
                                       indexBuffer: wheelIB, indexBufferOffset: 0)
         }
-
-        enc.endEncoding()
-        // No present: the library's command buffer already presented the
-        // drawable; this buffer's writes land in the same texture first.
-        cb.commit()
+        // Note: do NOT end encoding or commit — the library owns the encoder
+        // lifecycle. Our draws are part of the same render pass.
     }
 
     // MARK: Small matrix helpers

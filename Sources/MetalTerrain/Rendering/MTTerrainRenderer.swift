@@ -285,7 +285,11 @@ public final class MTTerrainRenderer {
 
     /// Renders the current frame into `view`. The host app owns the
     /// `MTKViewDelegate`; call this from `mtkView(_:draw:)`.
-    public func draw(in view: MTKView) {
+    /// - Parameter overlay: Optional closure called with the render encoder
+    ///   after the terrain is drawn but before the encoder ends. Use this to
+    ///   draw app-level objects (like a debug car) in the SAME render pass,
+    ///   avoiding the synchronization issues of a second pass.
+    public func draw(in view: MTKView, overlay: ((MTLRenderCommandEncoder) -> Void)? = nil) {
         if !viewConfigured {
             view.depthStencilPixelFormat = .depth32Float
             view.colorPixelFormat = .bgra8Unorm
@@ -311,6 +315,9 @@ public final class MTTerrainRenderer {
         drawScene(encoder: encoder, viewProj: viewProj, cameraPos: cameraPos,
                   terrainSlot: terrainSlot, waterSlot: waterSlot, time: time,
                   includeStructures: true, includeWater: true)
+
+        // App overlay (e.g. debug car) draws in the same pass, after terrain.
+        overlay?(encoder)
 
         encoder.endEncoding()
         commandBuffer.present(drawable)

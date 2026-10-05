@@ -556,14 +556,13 @@ struct TerrainView: UIViewRepresentable {
                                fovDegrees: 55, aspect: aspect,
                                near: 1, far: 4000)
             renderer.update(cameraTarget: SIMD2<Float>(target.x, target.z))
-            renderer.draw(in: view)
 
-            // Debug car overlay pass (app-only): drawn after the library's
-            // pass on the same drawable with load actions.
+            // Prepare the car overlay (if spawned): render the mirror
+            // reflection first, then draw the car in the same pass via
+            // the library's overlay closure (fixes the clipping bug from
+            // using a separate unsynchronized render pass).
+            var carOverlay: ((MTLRenderCommandEncoder) -> Void)?
             if carSpawned {
-                let viewProj = carPerspective(fovDegrees: 55, aspect: aspect,
-                                              near: 1, far: 4000)
-                    * carLookAt(eye: camPosition, target: camTarget)
                 // Live mirror reflection: render the scene from behind the
                 // car into a small texture (updated every frame).
                 if let device {
@@ -579,23 +578,31 @@ struct TerrainView: UIViewRepresentable {
                         let carM = carModelMatrix()
                         let carPos3 = SIMD3<Float>(carM.columns.3.x, carM.columns.3.y, carM.columns.3.z)
                         let fwd3 = SIMD3<Float>(sin(carHeading), 0, cos(carHeading))
-                        // Mirror camera: at the car, looking backward.
                         let mirrorEye = carPos3 + SIMD3<Float>(0, 4, 0)
                         let mirrorTarget = carPos3 - fwd3 * 50 + SIMD3<Float>(0, 2, 0)
                         renderer.renderReflection(to: reflTex, from: mirrorEye,
                                                   lookingAt: mirrorTarget)
                     }
                 }
-                carRenderer?.draw(in: view,
-                                  viewProj: viewProj,
-                                  cameraPos: camPosition,
-                                  sunAzimuth: renderer.sunAzimuth,
-                                  sunElevation: renderer.sunElevation,
-                                  carModel: carModelMatrix(),
-                                  wheelSpin: carWheelSpin,
-                                  steer: carSteer,
-                                  reflectionTex: mirrorReflectionTex)
+                let viewProj = carPerspective(fovDegrees: 55, aspect: aspect,
+                                              near: 1, far: 4000)
+                    * carLookAt(eye: camPosition, target: camTarget)
+                let carM = carModelMatrix()
+                let reflTex = mirrorReflectionTex
+                carOverlay = { [weak self] encoder in
+                    guard let self else { return }
+                    self.carRenderer?.draw(encoder: encoder,
+                                           viewProj: viewProj,
+                                           cameraPos: camPosition,
+                                           sunAzimuth: renderer.sunAzimuth,
+                                           sunElevation: renderer.sunElevation,
+                                           carModel: carM,
+                                           wheelSpin: self.carWheelSpin,
+                                           steer: self.carSteer,
+                                           reflectionTex: reflTex)
+                }
             }
+            renderer.draw(in: view, overlay: carOverlay)
         }
 
         // MARK: - Car camera math (mirrors the library's mtPerspective/mtLookAt)
