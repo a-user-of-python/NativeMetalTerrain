@@ -972,12 +972,12 @@ public final class MTTerrainRenderer {
                     lastUsed: Date().timeIntervalSince1970,
                     boundsMin: SIMD3<Float>(x0, min(y0, y1) - 20, z0),
                     boundsMax: SIMD3<Float>(x0 + size, max(y0, y1) + 20, z0 + size)
-                    #if M3_FEATURES
-                    , heightmapBuffer: hb,
-                    heightmapResolution: chunk.resolution,
-                    lodStride: distanceFactor > 0.4 ? 2 : 1
-                    #endif
                 )
+                #if M3_FEATURES
+                self.chunkCache[coord]?.heightmapBuffer = hb
+                self.chunkCache[coord]?.heightmapResolution = chunk.resolution
+                self.chunkCache[coord]?.lodStride = distanceFactor > 0.4 ? 2 : 1
+                #endif
             }
             self.pendingBuilds.remove(coord)
             self.cacheLock.unlock()
