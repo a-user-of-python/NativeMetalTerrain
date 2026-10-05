@@ -565,13 +565,17 @@ struct TerrainView: UIViewRepresentable {
             if carSpawned {
                 // Live mirror reflection: render the scene from behind the
                 // car into a small texture (updated every frame).
-                // Skipped in the simulator: software Metal rendering makes
-                // this peg the CPU (the mirrors just show the fallback color).
-                #if !targetEnvironment(simulator)
+                // In the simulator Metal runs on the CPU in software, so we
+                // use a tiny texture there to avoid pegging the CPU.
+                #if targetEnvironment(simulator)
+                let reflW = 32, reflH = 16
+                #else
+                let reflW = 256, reflH = 128
+                #endif
                 if let device {
                     if mirrorReflectionTex == nil {
                         let desc = MTLTextureDescriptor.texture2DDescriptor(
-                            pixelFormat: .bgra8Unorm, width: 256, height: 128,
+                            pixelFormat: .bgra8Unorm, width: reflW, height: reflH,
                             mipmapped: false)
                         desc.usage = [.renderTarget, .shaderRead]
                         desc.storageMode = .private
@@ -587,7 +591,6 @@ struct TerrainView: UIViewRepresentable {
                                                   lookingAt: mirrorTarget)
                     }
                 }
-                #endif
                 let viewProj = carPerspective(fovDegrees: 55, aspect: aspect,
                                               near: 1, far: 4000)
                     * carLookAt(eye: camPosition, target: camTarget)
