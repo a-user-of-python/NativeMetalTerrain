@@ -413,11 +413,13 @@ struct TerrainView: UIViewRepresentable {
             carSpeed = min(50, max(-18, carSpeed))
 
             // Steering: responsive at low speed, stable at high speed.
+            // Note: negated because the chase camera mirrors the steering
+            // (joystick left must turn the car left on screen).
             if abs(carSpeed) > 0.5 {
                 let wheelBase: Float = 5.4
                 // Reduce steering at high speed to prevent spinouts.
                 let speedDamp = 1.0 / (1.0 + abs(carSpeed) * 0.02)
-                carHeading += carSteer * CarRenderer.maxSteerAngle
+                carHeading -= carSteer * CarRenderer.maxSteerAngle
                     * (carSpeed / wheelBase) * speedDamp * dt
             }
 

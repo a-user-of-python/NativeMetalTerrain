@@ -168,28 +168,6 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
     float3 varied = in.color * (1.0 + detail * 0.12);
     float3 col = applyLighting(varied, in.normal, in.worldPos, in.material, uniforms);
 
-    // Shoreline foam: where sand is just above the water level, add animated
-    // foam bands. The foam moves with time (waves lapping) and fades with
-    // height above water. This creates a clean shoreline without geometric
-    // glitching — the water plane stays flat, foam is purely visual.
-    float waterY = uniforms.seaLevel.x;
-    float heightAboveWater = in.worldPos.y - waterY;
-    // Foam band: 0 to 3 units above water, only on sand (material 2).
-    if (in.material > 1.5 && in.material < 2.5 && heightAboveWater > 0.0 && heightAboveWater < 4.0) {
-        float t = uniforms.misc.x;
-        // Animated foam edge: sine waves moving shoreward.
-        float foamPattern = sin(in.worldPos.x * 0.25 + t * 1.2) * sin(in.worldPos.z * 0.22 - t * 0.9);
-        foamPattern = foamPattern * 0.5 + 0.5;  // 0...1
-        // Foam intensity: strongest at waterline, fading with height.
-        float foamBand = 1.0 - smoothstep(0.0, 3.5, heightAboveWater);
-        // Animated: foam pulses in and out.
-        float pulse = 0.6 + 0.4 * sin(t * 0.8 + heightAboveWater * 2.0);
-        float foam = foamBand * pulse * smoothstep(0.3, 0.7, foamPattern);
-        // White foam color, slightly blue in shadow.
-        float3 foamColor = mix(float3(0.85, 0.92, 0.95), float3(1.0), foamPattern);
-        col = mix(col, foamColor, foam * 0.85);
-    }
-
     // Smooth animated wireframe overlay (same as mesh-shader path).
     // misc.z = wireframe flag.
     if (uniforms.misc.z > 0.5f) {
@@ -222,51 +200,47 @@ fragment float4 water_fragment(MTVaryings in [[stage_in]],
     float t = uniforms.misc.x;
     float2 p = in.worldPos.xz;
 
-    // Layered wave normals: 3 sine waves at different frequencies,
-    // directions, and speeds, plus fine detail noise. All animated.
+    // Layered wave normals: stronger for visibility.
     float2 grad = float2(0.0);
-    // Large swells
-    grad += 0.08 * float2(cos(dot(p, float2(0.11, 0.07)) + t * 0.9),
-                          cos(dot(p, float2(-0.06, 0.13)) + t * 0.7)) * float2(0.11, 0.07);
+    // Large swells (more pronounced)
+    grad += 0.14 * float2(cos(dot(p, float2(0.11, 0.07)) + t * 0.9),
+                          cos(dot(p, float2(-0.06, 0.13)) + t * 0.7));
     // Medium chop
-    grad += 0.05 * float2(cos(dot(p, float2(0.31, -0.24)) + t * 1.7),
-                          cos(dot(p, float2(0.22, 0.35)) + t * 1.3)) * float2(0.31, 0.35);
-    // Fine ripples (animated noise)
+    grad += 0.09 * float2(cos(dot(p, float2(0.31, -0.24)) + t * 1.7),
+                          cos(dot(p, float2(0.22, 0.35)) + t * 1.3));
+    // Fine ripples (animated noise, stronger)
     float n1 = fract(sin(dot(floor(p * 2.0 + t * 0.5), float2(12.9898, 78.233))) * 43758.5453);
     float n2 = fract(sin(dot(floor(p * 2.0 - t * 0.3), float2(39.346, 11.135))) * 24634.6345);
-    grad += (float2(n1, n2) - 0.5) * 0.12;
+    grad += (float2(n1, n2) - 0.5) * 0.22;
 
     float3 n = normalize(float3(-grad.x, 1.0, -grad.y));
 
-    // Procedural water texture: layered value noise for surface variation.
-    // Two scrolling layers create the moving "caustic" feel.
+    // Procedural water texture: more contrast for visibility.
     float2 uv1 = p * 0.05 + float2(t * 0.03, t * 0.017);
     float2 uv2 = p * 0.11 - float2(t * 0.021, t * 0.038);
     float tex1 = fract(sin(dot(floor(uv1 * 8.0), float2(12.9898, 78.233))) * 43758.5453);
     float tex2 = fract(sin(dot(floor(uv2 * 8.0), float2(39.346, 11.135))) * 24634.6345);
     float texture_ = (tex1 * 0.6 + tex2 * 0.4);
 
-    // Base water color: deep teal with texture variation.
-    // (Deeper water = darker; we approximate depth with distance from shore
-    //  using the shoreline foam band below — for now, a rich base color.)
-    float3 deepColor = float3(0.02, 0.18, 0.28);
-    float3 shallowColor = float3(0.10, 0.45, 0.55);
-    float3 base = mix(deepColor, shallowColor, texture_ * 0.35);
+    // Base water color: richer teal with stronger texture variation.
+    float3 deepColor = float3(0.01, 0.22, 0.35);
+    float3 shallowColor = float3(0.15, 0.55, 0.65);
+    float3 base = mix(deepColor, shallowColor, texture_ * 0.55);
 
     // Lighting with wave normals.
     float3 viewDir = normalize(uniforms.cameraPos.xyz - in.worldPos);
     float3 lightDir = normalize(uniforms.lightDir.xyz);
     float diff = max(dot(n, lightDir), 0.0);
 
-    // Sun glints: sharp specular on wave crests.
+    // Sun glints: stronger for visibility.
     float3 h = normalize(lightDir + viewDir);
-    float spec = pow(max(dot(n, h), 0.0), 90.0) * 1.2;
+    float spec = pow(max(dot(n, h), 0.0), 70.0) * 1.8;
 
     // Fresnel: more reflective at grazing angles.
     float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
-    float3 skyReflect = float3(0.35, 0.55, 0.70) * fres * 0.6;
+    float3 skyReflect = float3(0.40, 0.60, 0.75) * fres * 0.7;
 
-    float3 col = base * (0.35 + diff * 0.65) + spec * float3(1.0, 0.95, 0.85) + skyReflect;
+    float3 col = base * (0.45 + diff * 0.75) + spec * float3(1.0, 0.95, 0.85) + skyReflect;
 
     // Distance fade to fog color (matches terrain fog).
     float dist = length(in.worldPos - uniforms.cameraPos.xyz);

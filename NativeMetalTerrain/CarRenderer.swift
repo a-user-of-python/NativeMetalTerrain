@@ -72,6 +72,9 @@ final class CarRenderer {
         float3 base = in.color;
         float mat = in.material;
 
+        // Boosted ambient so the car is never pitch black.
+        float amb = max(u.lightDir.w, 0.45);
+
         float3 col;
         if (mat < 0.5) {
             // Matte metal paint: moderate diffuse, broad soft specular
@@ -81,14 +84,14 @@ final class CarRenderer {
             float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.25;
             // Slight metallic tint in reflections
             float3 metalTint = mix(float3(1.0), base, 0.4);
-            col = base * (u.lightDir.w + diff * 0.75) + (spec + fres) * metalTint;
+            col = base * (amb + diff * 0.85) + (spec + fres) * metalTint;
         } else if (mat < 1.5) {
             // Glass: dark with strong fresnel
             float fres = pow(1.0 - max(dot(n, v), 0.0), 2.0);
-            col = base * (0.3 + diff * 0.4) + fres * float3(0.6, 0.7, 0.8);
+            col = base * (0.4 + diff * 0.5) + fres * float3(0.6, 0.7, 0.8);
         } else if (mat < 4.5) {
-            // Trim, tires, hubcaps: simple diffuse
-            col = base * (u.lightDir.w + diff * 0.9);
+            // Trim, tires, hubcaps: simple diffuse with good ambient
+            col = base * (amb + diff * 1.0);
         } else {
             // Mirror: sample the live reflection texture.
             // The reflection was rendered from behind the car, so the
@@ -223,12 +226,12 @@ final class CarRenderer {
     private var wheelIndexCount = 0
 
     /// Wheel offsets in car space (origin at ground under car center,
-    /// forward = +Z). Front pair steers.
+    /// forward = +Z). Front pair steers. Scaled for the 1.25x body.
     static let wheelOffsets: [(offset: SIMD3<Float>, steers: Bool)] = [
-        (SIMD3<Float>(-1.85, 1.0, 2.7), true),
-        (SIMD3<Float>(1.85, 1.0, 2.7), true),
-        (SIMD3<Float>(-1.85, 1.0, -2.7), false),
-        (SIMD3<Float>(1.85, 1.0, -2.7), false),
+        (SIMD3<Float>(-2.3, 1.25, 3.4), true),
+        (SIMD3<Float>(2.3, 1.25, 3.4), true),
+        (SIMD3<Float>(-2.3, 1.25, -3.4), false),
+        (SIMD3<Float>(2.3, 1.25, -3.4), false),
     ]
     static let maxSteerAngle: Float = 0.5  // radians (~28 deg)
 
@@ -267,49 +270,47 @@ final class CarRenderer {
     private func buildMeshes() {
         // Body + cabin + details share one buffer (one draw call).
         var b = MeshBuilder()
-        let paint = SIMD3<Float>(0.45, 0.47, 0.52)  // matte gunmetal
+        let paint = SIMD3<Float>(0.62, 0.64, 0.70)  // brighter matte silver-blue
         let glass = SIMD3<Float>(0.07, 0.09, 0.14)
         let darkTrim = SIMD3<Float>(0.10, 0.10, 0.12)
-        let handleMetal = SIMD3<Float>(0.65, 0.66, 0.70)
-        // Main body (matte metal, material 0).
-        b.addBox(min: SIMD3<Float>(-2.0, 1.3, -4.0),
-                 max: SIMD3<Float>(2.0, 2.9, 4.0), color: paint, material: 0)
+        let handleMetal = SIMD3<Float>(0.75, 0.76, 0.80)
+        // Main body (matte metal, material 0). Scaled 1.25x for visibility.
+        let s: Float = 1.25
+        b.addBox(min: SIMD3<Float>(-2.0 * s, 1.3 * s, -4.0 * s),
+                 max: SIMD3<Float>(2.0 * s, 2.9 * s, 4.0 * s), color: paint, material: 0)
         // Cabin (tinted glass, material 1).
-        b.addBox(min: SIMD3<Float>(-1.5, 2.9, -2.2),
-                 max: SIMD3<Float>(1.5, 4.0, 0.8), color: glass, material: 1)
+        b.addBox(min: SIMD3<Float>(-1.5 * s, 2.9 * s, -2.2 * s),
+                 max: SIMD3<Float>(1.5 * s, 4.0 * s, 0.8 * s), color: glass, material: 1)
         // Front/rear bumpers (trim, material 2).
-        b.addBox(min: SIMD3<Float>(-2.0, 1.0, 3.8),
-                 max: SIMD3<Float>(2.0, 1.6, 4.2), color: darkTrim, material: 2)
-        b.addBox(min: SIMD3<Float>(-2.0, 1.0, -4.2),
-                 max: SIMD3<Float>(2.0, 1.6, -3.8), color: darkTrim, material: 2)
+        b.addBox(min: SIMD3<Float>(-2.0 * s, 1.0 * s, 3.8 * s),
+                 max: SIMD3<Float>(2.0 * s, 1.6 * s, 4.2 * s), color: darkTrim, material: 2)
+        b.addBox(min: SIMD3<Float>(-2.0 * s, 1.0 * s, -4.2 * s),
+                 max: SIMD3<Float>(2.0 * s, 1.6 * s, -3.8 * s), color: darkTrim, material: 2)
         // 3D door handles: small protruding boxes on both doors.
-        // (Doors are on the ±X sides, handles near the rear of each door.)
         for side: Float in [-1, 1] {
-            let x0: Float = side > 0 ? 2.0 : -2.12
-            let x1: Float = side > 0 ? 2.12 : -2.0
-            b.addBox(min: SIMD3<Float>(min(x0, x1), 2.35, -0.9),
-                     max: SIMD3<Float>(max(x0, x1), 2.55, -0.1),
+            let x0: Float = side > 0 ? 2.0 * s : -2.12 * s
+            let x1: Float = side > 0 ? 2.12 * s : -2.0 * s
+            b.addBox(min: SIMD3<Float>(min(x0, x1), 2.35 * s, -0.9 * s),
+                     max: SIMD3<Float>(max(x0, x1), 2.55 * s, -0.1 * s),
                      color: handleMetal, material: 0.0)
         }
         // Side mirrors: stalk + housing + reflective glass.
-        // Left mirror (driver side, -X).
-        b.addBox(min: SIMD3<Float>(-2.35, 3.1, 0.55),
-                 max: SIMD3<Float>(-2.05, 3.25, 0.75),
-                 color: darkTrim, material: 2)  // stalk
-        b.addBox(min: SIMD3<Float>(-2.55, 3.15, 0.45),
-                 max: SIMD3<Float>(-2.35, 3.65, 0.95),
-                 color: paint, material: 0)  // housing
-        b.addMirrorQuad(center: SIMD3<Float>(-2.45, 3.4, 0.70),
-                        width: 0.18, height: 0.42, facing: -1)  // glass faces back
-        // Right mirror (+X).
-        b.addBox(min: SIMD3<Float>(2.05, 3.1, 0.55),
-                 max: SIMD3<Float>(2.35, 3.25, 0.75),
-                 color: darkTrim, material: 2)  // stalk
-        b.addBox(min: SIMD3<Float>(2.35, 3.15, 0.45),
-                 max: SIMD3<Float>(2.55, 3.65, 0.95),
-                 color: paint, material: 0)  // housing
-        b.addMirrorQuad(center: SIMD3<Float>(2.45, 3.4, 0.70),
-                        width: 0.18, height: 0.42, facing: -1)  // glass faces back
+        b.addBox(min: SIMD3<Float>(-2.35 * s, 3.1 * s, 0.55 * s),
+                 max: SIMD3<Float>(-2.05 * s, 3.25 * s, 0.75 * s),
+                 color: darkTrim, material: 2)
+        b.addBox(min: SIMD3<Float>(-2.55 * s, 3.15 * s, 0.45 * s),
+                 max: SIMD3<Float>(-2.35 * s, 3.65 * s, 0.95 * s),
+                 color: paint, material: 0)
+        b.addMirrorQuad(center: SIMD3<Float>(-2.45 * s, 3.4 * s, 0.70 * s),
+                        width: 0.18 * s, height: 0.42 * s, facing: -1)
+        b.addBox(min: SIMD3<Float>(2.05 * s, 3.1 * s, 0.55 * s),
+                 max: SIMD3<Float>(2.35 * s, 3.25 * s, 0.75 * s),
+                 color: darkTrim, material: 2)
+        b.addBox(min: SIMD3<Float>(2.35 * s, 3.15 * s, 0.45 * s),
+                 max: SIMD3<Float>(2.55 * s, 3.65 * s, 0.95 * s),
+                 color: paint, material: 0)
+        b.addMirrorQuad(center: SIMD3<Float>(2.45 * s, 3.4 * s, 0.70 * s),
+                        width: 0.18 * s, height: 0.42 * s, facing: -1)
         bodyVB = device.makeBuffer(bytes: b.verts,
                                    length: b.verts.count * MemoryLayout<MTVertex>.stride,
                                    options: .storageModeShared)
