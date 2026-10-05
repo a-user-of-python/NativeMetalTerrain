@@ -405,7 +405,7 @@ public final class MTTerrainRenderer {
         let pipeline: MTLRenderPipelineState = (tlas != nil) ? (terrainPipelineRT ?? terrainPipeline)
                                                              : terrainPipeline
         #else
-        let pipeline = terrainPipeline
+        let pipeline: MTLRenderPipelineState = terrainPipeline
         #endif
         encoder.setRenderPipelineState(pipeline)
         bindUniforms(encoder, slot: slot)
