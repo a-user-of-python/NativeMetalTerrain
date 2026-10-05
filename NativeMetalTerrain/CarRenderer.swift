@@ -288,23 +288,19 @@ final class CarRenderer {
                      max: SIMD3<Float>(max(x0, x1), 2.55 * s, -0.1 * s),
                      color: handleMetal, material: 0.0)
         }
-        // Side mirrors: stalk + housing + reflective glass.
+        // Side mirrors: stalk + housing (mirror glass removed for performance).
         b.addBox(min: SIMD3<Float>(-2.35 * s, 3.1 * s, 0.55 * s),
                  max: SIMD3<Float>(-2.05 * s, 3.25 * s, 0.75 * s),
                  color: darkTrim, material: 2)
         b.addBox(min: SIMD3<Float>(-2.55 * s, 3.15 * s, 0.45 * s),
                  max: SIMD3<Float>(-2.35 * s, 3.65 * s, 0.95 * s),
                  color: paint, material: 0)
-        b.addMirrorQuad(center: SIMD3<Float>(-2.45 * s, 3.4 * s, 0.70 * s),
-                        width: 0.18 * s, height: 0.42 * s, facing: -1)
         b.addBox(min: SIMD3<Float>(2.05 * s, 3.1 * s, 0.55 * s),
                  max: SIMD3<Float>(2.35 * s, 3.25 * s, 0.75 * s),
                  color: darkTrim, material: 2)
         b.addBox(min: SIMD3<Float>(2.35 * s, 3.15 * s, 0.45 * s),
                  max: SIMD3<Float>(2.55 * s, 3.65 * s, 0.95 * s),
                  color: paint, material: 0)
-        b.addMirrorQuad(center: SIMD3<Float>(2.45 * s, 3.4 * s, 0.70 * s),
-                        width: 0.18 * s, height: 0.42 * s, facing: -1)
         bodyVB = device.makeBuffer(bytes: b.verts,
                                    length: b.verts.count * MemoryLayout<MTVertex>.stride,
                                    options: .storageModeShared)

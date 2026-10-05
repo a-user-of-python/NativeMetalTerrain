@@ -134,8 +134,6 @@ struct TerrainView: UIViewRepresentable {
         var followCamPos = SIMD3<Float>(0, 0, 0)
         var followCamInit = false
         private var carRenderer: CarRenderer?
-        private var mirrorReflectionTex: MTLTexture?  // live scene for car mirrors
-        private var reflectionFrameCount = 0  // throttle reflections in simulator
 
         private var parent = TerrainView(
             seed: .constant(1337), rebuildToken: .constant(0),
@@ -558,49 +556,12 @@ struct TerrainView: UIViewRepresentable {
                                near: 1, far: 4000)
             renderer.update(cameraTarget: SIMD2<Float>(target.x, target.z))
 
-            // Prepare the car overlay (if spawned): render the mirror
-            // reflection first, then draw the car in the same pass via
-            // the library's overlay closure (fixes the clipping bug from
-            // using a separate unsynchronized render pass).
             var carOverlay: ((MTLRenderCommandEncoder) -> Void)?
             if carSpawned {
-                // Live mirror reflection: render the scene from behind the
-                // car into a small texture.
-                // In the simulator Metal runs on the CPU in software, so we
-                // use a tiny texture updated every 10th frame to avoid
-                // pegging the CPU.
-                #if targetEnvironment(simulator)
-                let reflW = 32, reflH = 16
-                let updateReflection = (reflectionFrameCount % 10 == 0)
-                #else
-                let reflW = 256, reflH = 128
-                let updateReflection = true
-                #endif
-                reflectionFrameCount += 1
-                if updateReflection, let device {
-                    if mirrorReflectionTex == nil {
-                        let desc = MTLTextureDescriptor.texture2DDescriptor(
-                            pixelFormat: .bgra8Unorm, width: reflW, height: reflH,
-                            mipmapped: false)
-                        desc.usage = [.renderTarget, .shaderRead]
-                        desc.storageMode = .private
-                        mirrorReflectionTex = device.makeTexture(descriptor: desc)
-                    }
-                    if let reflTex = mirrorReflectionTex {
-                        let carM = carModelMatrix()
-                        let carPos3 = SIMD3<Float>(carM.columns.3.x, carM.columns.3.y, carM.columns.3.z)
-                        let fwd3 = SIMD3<Float>(sin(carHeading), 0, cos(carHeading))
-                        let mirrorEye = carPos3 + SIMD3<Float>(0, 4, 0)
-                        let mirrorTarget = carPos3 - fwd3 * 50 + SIMD3<Float>(0, 2, 0)
-                        renderer.renderReflection(to: reflTex, from: mirrorEye,
-                                                  lookingAt: mirrorTarget)
-                    }
-                }
                 let viewProj = carPerspective(fovDegrees: 55, aspect: aspect,
                                               near: 1, far: 4000)
                     * carLookAt(eye: camPosition, target: camTarget)
                 let carM = carModelMatrix()
-                let reflTex = mirrorReflectionTex
                 carOverlay = { [weak self] encoder in
                     guard let self else { return }
                     self.carRenderer?.draw(encoder: encoder,
@@ -611,7 +572,7 @@ struct TerrainView: UIViewRepresentable {
                                            carModel: carM,
                                            wheelSpin: self.carWheelSpin,
                                            steer: self.carSteer,
-                                           reflectionTex: reflTex)
+                                           reflectionTex: nil)
                 }
             }
             renderer.draw(in: view, overlay: carOverlay)
