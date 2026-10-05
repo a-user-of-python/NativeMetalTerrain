@@ -93,7 +93,7 @@ struct MTMeshBiome {
                          // z = hasSlopeColor 0/1, w = isSnowyPeak 0/1
 };
 
-/// Must stay layout-identical to `MTUniforms` in MTShaders.metal (192
+/// Must stay layout-identical to `MTUniforms` in MTShaders.metal (208
 /// bytes). The fragment shader below reads the same uniform buffer the
 /// renderer already binds at fragment buffer(1) for the standard path.
 struct MTUniforms {
@@ -103,6 +103,7 @@ struct MTUniforms {
     float4 fogColor;    // rgb = fog color, w = fog density
     float4 lightDir;    // xyz = light direction, w = ambient strength
     float4 misc;        // x = time seconds, y = shader effects (0/1)
+    float4 seaLevel;    // x = world-space water level (for shoreline foam)
 };
 
 /// Mesh-stage vertex output. Field-for-field identical to `MTVaryings` in
@@ -524,6 +525,20 @@ fragment float4 mesh_terrain_fragment(MTMeshVaryings in [[stage_in]],
     float detail = mix(n, n2, 0.5) - 0.5;  // -0.5 ... 0.5
     float3 varied = in.color * (1.0 + detail * 0.12);
     float3 col = meshApplyLighting(varied, in.normal, in.worldPos, in.material, uniforms);
+
+    // Shoreline foam (same as standard path): animated foam on sand near water.
+    float waterY = uniforms.seaLevel.x;
+    float heightAboveWater = in.worldPos.y - waterY;
+    if (in.material > 1.5 && in.material < 2.5 && heightAboveWater > 0.0 && heightAboveWater < 4.0) {
+        float t = uniforms.misc.x;
+        float foamPattern = sin(in.worldPos.x * 0.25 + t * 1.2) * sin(in.worldPos.z * 0.22 - t * 0.9);
+        foamPattern = foamPattern * 0.5 + 0.5;
+        float foamBand = 1.0 - smoothstep(0.0, 3.5, heightAboveWater);
+        float pulse = 0.6 + 0.4 * sin(t * 0.8 + heightAboveWater * 2.0);
+        float foam = foamBand * pulse * smoothstep(0.3, 0.7, foamPattern);
+        float3 foamColor = mix(float3(0.85, 0.92, 0.95), float3(1.0), foamPattern);
+        col = mix(col, foamColor, foam * 0.85);
+    }
 
     // Smooth animated wireframe overlay.
     if (uniforms.misc.z > 0.5f) {

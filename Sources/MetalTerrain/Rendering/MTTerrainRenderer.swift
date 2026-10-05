@@ -74,6 +74,7 @@ private struct MTUniforms {
     var fogColor: SIMD4<Float>   // rgb = fog color, w = fog density
     var lightDir: SIMD4<Float>   // xyz = light direction, w = ambient
     var misc: SIMD4<Float>       // x = time seconds
+    var seaLevel: SIMD4<Float>   // x = normalized sea level (0...1)
 }
 
 /// Must match `MTInstanceData` in MTShaders.metal (80 bytes).
@@ -146,7 +147,7 @@ public final class MTTerrainRenderer {
         }
         self.commandQueue = queue
         self.uniformStride = MemoryLayout<MTUniforms>.stride
-        precondition(uniformStride == 192, "MTUniforms layout drifted from MTShaders.metal")
+        precondition(uniformStride == 208, "MTUniforms layout drifted from MTShaders.metal")
         // Metal requires buffer offsets bound via setVertexBuffer/setFragmentBuffer
         // to be multiples of 256. MTUniforms is 192 bytes, so pad the stride.
         self.uniformStrideAligned = (uniformStride + 255) & ~255
@@ -981,6 +982,7 @@ public final class MTTerrainRenderer {
         let el = sunElevation * .pi / 180
         let sunDir = SIMD3<Float>(cos(el) * sin(az), sin(el), cos(el) * cos(az))
         // misc: x=time, y=shaderFX, z=wireframe, w=detailAmount
+        // seaLevel.x = world-space water level (for shoreline foam)
         let u = MTUniforms(
             viewProj: viewProj ?? self.viewProj,
             model: model,
@@ -988,7 +990,8 @@ public final class MTTerrainRenderer {
             fogColor: SIMD4<Float>(cfg.fogColor, density),
             lightDir: SIMD4<Float>(normalize(sunDir), 0.38),
             misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0,
-                               wireframe ? 1 : 0, detailAmount)
+                               wireframe ? 1 : 0, detailAmount),
+            seaLevel: SIMD4<Float>(world.worldY(forHeight: cfg.seaLevel), 0, 0, 0)
         )
         var copy = u
         let dst = uniformBuffer.contents().advanced(by: slot * uniformStrideAligned)
