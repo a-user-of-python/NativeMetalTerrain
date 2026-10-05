@@ -190,24 +190,50 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
     return float4(col, 1.0);
 }
 
-// Water: simple flat plane at sea level. Constant color, no waves or
-// fancy effects — just a clean plane that blocks movement (the app
-// prevents the player/car from entering water).
+// Water: procedural animated texture. The plane stays geometrically flat
+// (no vertex displacement) — all the wave detail is in the fragment
+// shader texture, not the physical triangles. No shore-specific effects.
 fragment float4 water_fragment(MTVaryings in [[stage_in]],
                                constant MTUniforms &uniforms [[buffer(1)]],
                                constant float &alpha [[buffer(2)]]) {
-    // Flat water color with slight depth-based darkening.
-    float3 col = float3(0.05, 0.30, 0.45);
+    float t = uniforms.misc.x;
+    float2 p = in.worldPos.xz;
 
-    // Simple sun specular for a bit of life (no wave normals).
-    float3 n = float3(0.0, 1.0, 0.0);
+    // Animated wave normals (texture only, not geometry).
+    float2 grad = float2(0.0);
+    grad += 0.14 * float2(cos(dot(p, float2(0.11, 0.07)) + t * 0.9),
+                          cos(dot(p, float2(-0.06, 0.13)) + t * 0.7));
+    grad += 0.09 * float2(cos(dot(p, float2(0.31, -0.24)) + t * 1.7),
+                          cos(dot(p, float2(0.22, 0.35)) + t * 1.3));
+    float n1 = fract(sin(dot(floor(p * 2.0 + t * 0.5), float2(12.9898, 78.233))) * 43758.5453);
+    float n2 = fract(sin(dot(floor(p * 2.0 - t * 0.3), float2(39.346, 11.135))) * 24634.6345);
+    grad += (float2(n1, n2) - 0.5) * 0.22;
+
+    float3 n = normalize(float3(-grad.x, 1.0, -grad.y));
+
+    // Procedural texture: scrolling noise layers.
+    float2 uv1 = p * 0.05 + float2(t * 0.03, t * 0.017);
+    float2 uv2 = p * 0.11 - float2(t * 0.021, t * 0.038);
+    float tex1 = fract(sin(dot(floor(uv1 * 8.0), float2(12.9898, 78.233))) * 43758.5453);
+    float tex2 = fract(sin(dot(floor(uv2 * 8.0), float2(39.346, 11.135))) * 24634.6345);
+    float texture_ = (tex1 * 0.6 + tex2 * 0.4);
+
+    float3 deepColor = float3(0.01, 0.22, 0.35);
+    float3 shallowColor = float3(0.15, 0.55, 0.65);
+    float3 base = mix(deepColor, shallowColor, texture_ * 0.55);
+
     float3 viewDir = normalize(uniforms.cameraPos.xyz - in.worldPos);
     float3 lightDir = normalize(uniforms.lightDir.xyz);
-    float3 h = normalize(lightDir + viewDir);
-    float spec = pow(max(dot(n, h), 0.0), 60.0) * 0.5;
-    col += spec * float3(1.0, 0.95, 0.85);
+    float diff = max(dot(n, lightDir), 0.0);
 
-    // Distance fade to fog color.
+    float3 h = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(n, h), 0.0), 70.0) * 1.8;
+
+    float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+    float3 skyReflect = float3(0.40, 0.60, 0.75) * fres * 0.7;
+
+    float3 col = base * (0.45 + diff * 0.75) + spec * float3(1.0, 0.95, 0.85) + skyReflect;
+
     float dist = length(in.worldPos - uniforms.cameraPos.xyz);
     float fogFactor = 1.0 - exp(-dist * uniforms.fogColor.w);
     col = mix(col, uniforms.fogColor.rgb, fogFactor);
