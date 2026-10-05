@@ -131,13 +131,23 @@ public final class MTTerrainRenderer {
     /// Render distance in chunks (radius). Changing this updates the world
     /// config, which triggers a cache invalidation and rebuild.
     public var viewDistance: Int {
-        get { world.config.viewDistance }
+        get { viewDistanceOverride ?? world.config.viewDistance }
         set {
-            var cfg = world.config
-            cfg.viewDistance = newValue
-            world.config = cfg
+            // Don't touch world.config here: that bumps configVersion which
+            // invalidates the entire chunk cache (world regenerates).
+            // Just update the override; update() picks up the new radius
+            // and streams the additional chunks without dropping existing ones.
+            let clamped = min(max(1, newValue), 10)
+            if viewDistanceOverride != clamped {
+                viewDistanceOverride = clamped
+                // Water mesh size depends on viewDistance; rebuild it.
+                // Chunk cache is NOT invalidated — existing chunks stay.
+                buildWaterMesh()
+            }
         }
     }
+    /// Local override for viewDistance. When nil, uses world.config.viewDistance.
+    private var viewDistanceOverride: Int?
 
     public init(device: MTLDevice, world: MTTerrainWorld) {
         self.device = device
@@ -195,18 +205,20 @@ public final class MTTerrainRenderer {
         }
         let cfg = world.config
         let size = cfg.chunkWorldSize
-        let radius = cfg.viewDistance
+        let radius = viewDistance
         let center = MTChunkCoord(x: Int(floor(cameraTarget.x / size)),
                                   z: Int(floor(cameraTarget.y / size)))
 
-        // Fast path: if the camera hasn't crossed a chunk boundary, the needed
-        // set is identical — skip the Set rebuild, eviction scan, and dispatch
-        // loop entirely. (update() runs 60x/sec; this work is only needed
-        // on movement.)
-        if center == lastCenter {
+        // Fast path: if the camera hasn't crossed a chunk boundary AND the
+        // view distance hasn't changed, the needed set is identical — skip
+        // the Set rebuild, eviction scan, and dispatch loop entirely.
+        // (update() runs 60x/sec; this work is only needed on movement
+        // or viewDistance change.)
+        if center == lastCenter && radius == lastRadius {
             return
         }
         lastCenter = center
+        lastRadius = radius
 
         var needed = Set<MTChunkCoord>()
         needed.reserveCapacity((2 * radius + 1) * (2 * radius + 1))
@@ -399,7 +411,7 @@ public final class MTTerrainRenderer {
         // Water plane is built around the XZ origin; recenter it under the camera.
         // Snap to the water grid (size/64) so vertices align to stable world
         // positions — prevents shoreline swimming/jitter as the camera moves.
-        let waterSize = Float(world.config.viewDistance * 2 + 4) * world.config.chunkWorldSize
+        let waterSize = Float(viewDistance * 2 + 4) * world.config.chunkWorldSize
         let waterGrid = waterSize / 64.0
         let snappedX = (lastCameraTarget.x / waterGrid).rounded() * waterGrid
         let snappedZ = (lastCameraTarget.y / waterGrid).rounded() * waterGrid
@@ -704,6 +716,7 @@ public final class MTTerrainRenderer {
     private var cameraPos = SIMD3<Float>(0, 0, 0)
     private var lastCameraTarget = SIMD2<Float>(0, 0)
     private var lastCenter: MTChunkCoord?
+    private var lastRadius: Int?
     private var lastConfigVersion: UInt64 = 0
     private let waterAlpha: Float = 0.82
     private let startTime = Date()
@@ -1055,7 +1068,7 @@ public final class MTTerrainRenderer {
             let cx = (Float(coord.x) + 0.5) * size
             let cz = (Float(coord.z) + 0.5) * size
             let dist = hypot(cx - cameraTarget.x, cz - cameraTarget.y)
-            let distanceFactor = dist / (Float(self.world.config.viewDistance) * size)
+            let distanceFactor = dist / (Float(self.viewDistance) * size)
             // LOD: far chunks generate at half resolution (4x fewer noise evals).
             // The mesh shader takes arbitrary resolution+lodStride, so half-res
             // heightmaps work identically on both paths.
@@ -1126,7 +1139,7 @@ public final class MTTerrainRenderer {
 
     private func buildWaterMesh() {
         let cfg = world.config
-        let size = Float(cfg.viewDistance * 2 + 4) * cfg.chunkWorldSize
+        let size = Float(viewDistance * 2 + 4) * cfg.chunkWorldSize
         let level = world.worldY(forHeight: cfg.seaLevel)
         let mesh = MTMeshBuilder.buildWaterMesh(size: size, level: level,
                                                 color: cfg.waterColor)
