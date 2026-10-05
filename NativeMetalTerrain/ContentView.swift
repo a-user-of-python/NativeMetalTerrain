@@ -28,6 +28,8 @@ struct ContentView: View {
     @State private var dragMode: DragMode = .orbit
     /// Debug car (separate debug panel, app-only).
     @State private var carActive = false
+    /// Simulator mode: auto-enabled in Xcode Simulator, toggleable in Debug.
+    @State private var simulatorMode = MTTerrainConfig.isSimulator
 
     var body: some View {
         GeometryReader { geo in
@@ -48,6 +50,7 @@ struct ContentView: View {
                     playerHeight: $playerHeight,
                     moveInput: $moveInput,
                     carActive: $carActive,
+                    simulatorMode: $simulatorMode,
                     onRendererReady: { renderer in
                         // Dispatch async: setting @State during updateUIView
                         // triggers "modifying state during view update".
@@ -108,7 +111,7 @@ struct ContentView: View {
                 // Debug panel (top-left, separate from control panel)
                 VStack {
                     HStack {
-                        DebugPanel(carActive: $carActive)
+                        DebugPanel(carActive: $carActive, simulatorMode: $simulatorMode)
                             .frame(width: 230)
                             .padding(.leading, 12)
                             .padding(.top, 12)

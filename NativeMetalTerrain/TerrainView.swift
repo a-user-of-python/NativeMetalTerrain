@@ -79,6 +79,9 @@ struct TerrainView: UIViewRepresentable {
     @Binding var moveInput: SIMD2<Float>
     /// Debug car active (spawned + follow camera).
     @Binding var carActive: Bool
+    /// Simulator mode: forces reduced settings (low res, fewer chunks).
+    /// Auto-enabled in Xcode Simulator; toggleable in Debug menu.
+    @Binding var simulatorMode: Bool
     /// Called once the Metal renderer exists, so ContentView can push
     /// sun updates directly without a SwiftUI re-render.
     var onRendererReady: ((MTTerrainRenderer) -> Void)?
@@ -144,7 +147,7 @@ struct TerrainView: UIViewRepresentable {
             dragMode: .constant(.orbit),
             cameraMode: .constant(.walk), playerHeight: .constant(2),
             moveInput: .constant(SIMD2<Float>(0, 0)),
-            carActive: .constant(false)
+            carActive: .constant(false), simulatorMode: .constant(false)
         )
         private var device: MTLDevice?
         private var world: MTTerrainWorld?
@@ -155,6 +158,7 @@ struct TerrainView: UIViewRepresentable {
         private var lastPreset: BiomePreset?
         private var lastStructuresEnabled: Bool?
         private var lastViewDistance: Int?
+        private var lastSimulatorMode: Bool?
 
         private var fpsEMA: Double = 60
         private var lastFrameTime: CFTimeInterval = 0
@@ -213,11 +217,12 @@ struct TerrainView: UIViewRepresentable {
         /// when the seed, rebuild token, or biome preset changed.
         func sync(with parent: TerrainView) {
             self.parent = parent
-            if lastSeed != parent.seed || lastToken != parent.rebuildToken || lastPreset != parent.preset {
+            if lastSeed != parent.seed || lastToken != parent.rebuildToken || lastPreset != parent.preset || lastSimulatorMode != parent.simulatorMode {
                 rebuildWorld(seed: parent.seed, preset: parent.preset)
                 lastSeed = parent.seed
                 lastToken = parent.rebuildToken
                 lastPreset = parent.preset
+                lastSimulatorMode = parent.simulatorMode
             }
             renderer?.wireframe = parent.wireframe
             renderer?.showsWater = parent.showsWater
@@ -249,30 +254,34 @@ struct TerrainView: UIViewRepresentable {
         private func rebuildWorld(seed: UInt64, preset: BiomePreset) {
             guard let device else { return }
 
+            // Simulator mode: manual toggle overrides auto-detection.
+            // Auto-enabled in Xcode Simulator; toggleable in Debug menu.
+            let baseConfig: MTTerrainConfig = parent.simulatorMode ? .simulator : .auto
+
             // ─────────────────────────────────────────────────────────
             // This is the whole integration:
             // ─────────────────────────────────────────────────────────
             let world: MTTerrainWorld
             switch preset {
             case .default:
-                world = MTTerrainWorld(seed: seed, config: .auto)
+                world = MTTerrainWorld(seed: seed, config: baseConfig)
             case .desert:
-                var config = MTTerrainConfig.auto
+                var config = baseConfig
                 config.biomes = Self.desertBiomes
                 world = MTTerrainWorld(seed: seed, config: config)
             case .alien:
-                var config = MTTerrainConfig.auto
+                var config = baseConfig
                 config.biomes = Self.alienBiomes
                 world = MTTerrainWorld(seed: seed, config: config)
             case .forest:
-                var config = MTTerrainConfig.auto
+                var config = baseConfig
                 config.biomes = Self.forestBiomes
                 // Dense woodland: boost structure density for a lived-in feel.
                 config.structureDensity = 0.65
                 config.structuresEnabled = true
                 world = MTTerrainWorld(seed: seed, config: config)
             case .custom:
-                world = MTTerrainWorld(seed: seed, config: .auto)
+                world = MTTerrainWorld(seed: seed, config: baseConfig)
                 // Custom biome: takes precedence over the built-ins in 0.80–1.0,
                 // replacing the default mountain/snowyPeak bands up there.
                 world.setBiome(MTBiome(
