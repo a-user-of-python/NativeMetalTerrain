@@ -564,7 +564,7 @@ struct TerrainView: UIViewRepresentable {
                     * carLookAt(eye: camPosition, target: camTarget)
                 // Live mirror reflection: render the scene from behind the
                 // car into a small texture (updated every frame).
-                if let renderer, let device {
+                if let device {
                     if mirrorReflectionTex == nil {
                         let desc = MTLTextureDescriptor.texture2DDescriptor(
                             pixelFormat: .bgra8Unorm, width: 256, height: 128,

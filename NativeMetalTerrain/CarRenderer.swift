@@ -285,11 +285,11 @@ final class CarRenderer {
         // 3D door handles: small protruding boxes on both doors.
         // (Doors are on the ±X sides, handles near the rear of each door.)
         for side: Float in [-1, 1] {
-            let x0 = side > 0 ? 2.0 : -2.12
-            let x1 = side > 0 ? 2.12 : -2.0
+            let x0: Float = side > 0 ? 2.0 : -2.12
+            let x1: Float = side > 0 ? 2.12 : -2.0
             b.addBox(min: SIMD3<Float>(min(x0, x1), 2.35, -0.9),
                      max: SIMD3<Float>(max(x0, x1), 2.55, -0.1),
-                     color: handleMetal, material: 0)
+                     color: handleMetal, material: 0.0)
         }
         // Side mirrors: stalk + housing + reflective glass.
         // Left mirror (driver side, -X).
