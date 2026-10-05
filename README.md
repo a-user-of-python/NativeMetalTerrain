@@ -14,3 +14,5 @@ Open `NativeMetalTerrain.xcodeproj` in Xcode and run on a physical iOS device.
 
 ## Releases
 Unsigned IPAs are built automatically via GitHub Actions and attached to releases. Sideload with Sideloadly or AltStore.
+
+> Built with Muse — AI-assisted development.
