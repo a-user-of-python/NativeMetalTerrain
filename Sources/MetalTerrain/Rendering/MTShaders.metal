@@ -166,7 +166,20 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
     float n2 = fract(sin(dot(floor(p.xz) + 1.0, float2(12.9898, 78.233))) * 43758.5453);
     float detail = mix(n, n2, 0.5) - 0.5;  // -0.5 ... 0.5
     float3 varied = in.color * (1.0 + detail * 0.12);
-    float3 col = applyLighting(varied, in.normal, in.worldPos, in.material, uniforms);
+
+    // Bump mapping: perturb the normal with per-pixel noise for visible
+    // 3D surface texture. Stronger for rock (craggy), subtle for grass.
+    float bumpScale;
+    if (in.material < 0.5) bumpScale = 0.15;       // grass: subtle
+    else if (in.material < 1.5) bumpScale = 0.45;   // rock: craggy
+    else if (in.material < 2.5) bumpScale = 0.20;   // sand: ripples
+    else bumpScale = 0.25;                          // snow: soft drifts
+    float2 bp = in.worldPos.xz * 0.8;
+    float bn1 = fract(sin(dot(floor(bp), float2(12.9898, 78.233))) * 43758.5453) - 0.5;
+    float bn2 = fract(sin(dot(floor(bp + 0.5), float2(39.346, 11.135))) * 24634.6345) - 0.5;
+    float3 bumpedNormal = normalize(in.normal + float3(bn1, 0.0, bn2) * bumpScale);
+
+    float3 col = applyLighting(varied, bumpedNormal, in.worldPos, in.material, uniforms);
 
     // Smooth animated wireframe overlay (same as mesh-shader path).
     // misc.z = wireframe flag.
