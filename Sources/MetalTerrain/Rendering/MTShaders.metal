@@ -25,7 +25,7 @@ struct MTUniforms {
     float4 cameraPos;   // xyz = camera position
     float4 fogColor;    // rgb = fog color, w = fog density
     float4 lightDir;    // xyz = light direction, w = ambient strength
-    float4 misc;        // x = time seconds, y = shader effects (0/1)
+    float4 misc;        // x = time, y = shaderFX (0/1), z = wireframe (0/1), w = detailAmount
 };
 
 // Must match MTInstanceData in MTTerrainRenderer.swift (80 bytes).
@@ -42,18 +42,59 @@ struct MTVaryings {
     float material;  // 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water
 };
 
+/// Hash-based value noise for procedural geometric detail (standard path).
+float meshHash21Std(float2 p) {
+    float3 p3 = fract(float3(p.xyx) * 0.1031f);
+    p3 += dot(p3, p3.yzx + 33.33f);
+    return fract((p3.x + p3.y) * p3.z);
+}
+float meshValueNoiseStd(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    float2 u = f * f * (3.0f - 2.0f * f);
+    return mix(mix(meshHash21Std(i), meshHash21Std(i + float2(1,0)), u.x),
+               mix(meshHash21Std(i + float2(0,1)), meshHash21Std(i + float2(1,1)), u.x), u.y);
+}
+float meshDetailNoiseStd(float2 p) {
+    return meshValueNoiseStd(p) * 0.65f + meshValueNoiseStd(p * 2.7f + 13.7f) * 0.35f;
+}
+/// Procedural displacement (amplitude, frequency) per material.
+float2 meshDetailParamsStd(float material) {
+    if (material < 0.5f) return float2(0.9f, 0.55f);       // grass: tufty bumps
+    else if (material < 1.5f) return float2(1.6f, 0.35f);  // rock: craggy
+    else if (material < 2.5f) return float2(0.35f, 1.4f); // sand: ripples
+    else if (material < 4.5f) return float2(0.5f, 0.22f); // snow: drifts
+    else if (material < 5.5f) return float2(0.25f, 0.45f);// water: waves
+    return float2(0.0f, 1.0f);
+}
+
 // Shared vertex transform: model matrix, then view-projection.
+// Applies procedural geometric detail displacement (same as the mesh
+// shader path) so standard-path terrain also gets real 3D texture.
 vertex MTVaryings terrain_vertex(const device MTVertexIn *vertices [[buffer(0)]],
                                  constant MTUniforms &uniforms [[buffer(1)]],
                                  uint vid [[vertex_id]]) {
     MTVertexIn v = vertices[vid];
-    float4 world = uniforms.model * float4(v.position.xyz, 1.0);
+    float material = v.color.a;
+    float3 worldPos = (uniforms.model * float4(v.position.xyz, 1.0)).xyz;
+    float3 nrm = normalize((uniforms.model * float4(v.normal.xyz, 0.0)).xyz);
+    // Procedural detail: displace along normal by material noise.
+    // misc: x=time, y=shaderFX, z=wireframe, w=detailAmount
+    float detailAmt = uniforms.misc.w;
+    if (detailAmt > 0.001f) {
+        float2 dp = meshDetailParamsStd(material);
+        float2 np = worldPos.xz * dp.y;
+        float timeOff = (material > 4.5f && material < 5.5f) ? uniforms.misc.x * 0.8f : 0.0f;
+        float n0 = meshDetailNoiseStd(np + float2(timeOff, timeOff * 0.7f));
+        worldPos.y += (n0 - 0.5f) * 2.0f * dp.x * detailAmt * nrm.y;
+    }
+    float4 world = float4(worldPos, 1.0);
     MTVaryings out;
     out.clipPos = uniforms.viewProj * world;
-    out.worldPos = world.xyz;
-    out.normal = (uniforms.model * float4(v.normal.xyz, 0.0)).xyz;
+    out.worldPos = worldPos;
+    out.normal = nrm;
     out.color = v.color.rgb;
-    out.material = v.color.a;
+    out.material = material;
     return out;
 }
 
@@ -123,6 +164,26 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
     float detail = mix(n, n2, 0.5) - 0.5;  // -0.5 ... 0.5
     float3 varied = in.color * (1.0 + detail * 0.12);
     float3 col = applyLighting(varied, in.normal, in.worldPos, in.material, uniforms);
+
+    // Smooth animated wireframe overlay (same as mesh-shader path).
+    // misc.z = wireframe flag.
+    if (uniforms.misc.z > 0.5f) {
+        float time = uniforms.misc.x;
+        float contourFreq = 0.08f;
+        float contour = abs(fract(in.worldPos.y * contourFreq - time * 0.15f) - 0.5f);
+        float contourLine = 1.0f - smoothstep(0.0f, fwidth(in.worldPos.y * contourFreq) * 2.0f + 0.02f, contour);
+        float2 gp = in.worldPos.xz * 0.02f;
+        float2 fw = fwidth(gp) + 1e-4f;
+        float2 g = abs(fract(gp - 0.5f) - 0.5f) / fw;
+        float gridLine = 1.0f - smoothstep(0.0f, 1.2f, min(g.x, g.y));
+        float dist = length(in.worldPos.xz - uniforms.cameraPos.xz);
+        float pulse = sin(dist * 0.03f - time * 2.5f);
+        float glow = smoothstep(0.6f, 1.0f, pulse) * 0.8f + 0.2f;
+        float wire = max(contourLine * 0.9f, gridLine * 0.55f);
+        float3 wireColor = mix(float3(0.2f, 0.9f, 1.0f), float3(1.0f, 1.0f, 1.0f), glow);
+        float fade = 1.0f - smoothstep(800.0f, 2500.0f, dist);
+        col = mix(col, wireColor * (0.6f + glow * 0.6f), wire * fade * 0.85f);
+    }
     return float4(col, 1.0);
 }
 

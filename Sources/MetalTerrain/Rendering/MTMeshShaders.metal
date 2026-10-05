@@ -78,6 +78,8 @@ struct MTMeshPayload {
     float    lodStride;   // 1 = full resolution, 2 = half resolution
     uint     gridN;       // vertices per side at this LOD
     uint     pad0;
+    float    time;        // seconds, for animated water/detail
+    float    detailAmt;   // 0=off … 1=full procedural geometric detail
 };
 
 /// One biome's coloring rules for the mesh shader. Swift mirror:
@@ -124,6 +126,50 @@ float4 meshNormPlane(float4 pl) {
 float meshSmooth01(float t) {
     float c = clamp(t, 0.0f, 1.0f);
     return c * c * (3.0f - 2.0f * c);
+}
+
+/// Hash-based value noise for procedural geometric detail. Two octaves
+/// give natural-looking bumps without visible tiling at terrain scale.
+float meshHash21(float2 p) {
+    float3 p3 = fract(float3(p.xyx) * 0.1031f);
+    p3 += dot(p3, p3.yzx + 33.33f);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float meshValueNoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    float2 u = f * f * (3.0f - 2.0f * f);
+    float a = meshHash21(i);
+    float b = meshHash21(i + float2(1.0f, 0.0f));
+    float c = meshHash21(i + float2(0.0f, 1.0f));
+    float d = meshHash21(i + float2(1.0f, 1.0f));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+/// Two-octave detail noise in [0,1].
+float meshDetailNoise(float2 p) {
+    return meshValueNoise(p) * 0.65f + meshValueNoise(p * 2.7f + 13.7f) * 0.35f;
+}
+
+/// Procedural geometric displacement amount for a material.
+/// Returns (amplitude, frequency). This is REAL geometry — the mesh shader
+/// displaces vertices along the normal, giving grass, rock, sand, and snow
+/// actual 3D texture instead of flat shading.
+/// Material ids: 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water.
+float2 meshDetailParams(float material) {
+    if (material < 0.5f) {          // grass: gentle tufty bumps
+        return float2(0.9f, 0.55f);
+    } else if (material < 1.5f) {   // rock: craggy
+        return float2(1.6f, 0.35f);
+    } else if (material < 2.5f) {   // sand: fine ripples
+        return float2(0.35f, 1.4f);
+    } else if (material < 4.5f) {   // snow: soft drifts
+        return float2(0.5f, 0.22f);
+    } else if (material < 5.5f) {   // water: gentle waves (animated below)
+        return float2(0.25f, 0.45f);
+    }
+    return float2(0.0f, 1.0f);
 }
 
 /// Biome-table lookup mirroring `MTTerrainWorld.biomeAt`: two passes so a
@@ -325,6 +371,8 @@ void mesh_terrain_object(object_data<MTMeshPayload> m,
     const int step_i = int(params.lodStride + 0.5f);
     p.gridN = uint((res_i - 1) / step_i + 1);
     p.pad0 = 0u;
+    p.time = uniforms.misc.x;
+    p.detailAmt = uniforms.misc.w;
     m.set_payload(p);
 
     const uint tiles = (p.gridN - 1u + 7u) / 8u;
@@ -387,14 +435,39 @@ void mesh_terrain_mesh(mesh<MTMeshVertexOut, void, MTMeshPayload,
 
             const float wx = p.chunkOrigin.x + float(i) / (p.resolution - 1.0f) * p.worldSize;
             const float wz = p.chunkOrigin.y + float(j) / (p.resolution - 1.0f) * p.worldSize;
-            const float wy = h * p.heightScale;
+            float wy = h * p.heightScale;
             const float4 rgba = meshGroundColor(h, nrm.y, biomes, biomeCount);
+
+            // Procedural geometric detail: displace along the normal by
+            // material-specific noise. This is real 3D texture — grass gets
+            // tufty bumps, rock gets craggy displacement, sand gets ripples,
+            // snow gets soft drifts. Water animates with time.
+            // Time and detail amount arrive via the object-shader payload.
+            float detailAmt = p.detailAmt;
+            float3 finalNrm = nrm;
+            if (detailAmt > 0.001f) {
+                float2 dp = meshDetailParams(rgba.a);
+                float2 np = float2(wx, wz) * dp.y;
+                float baseN = meshDetailNoise(np);
+                // Water waves animate; everything else is static.
+                float timeOff = (rgba.a > 4.5f && rgba.a < 5.5f) ? p.time * 0.8f : 0.0f;
+                float n0 = meshDetailNoise(np + float2(timeOff, timeOff * 0.7f));
+                float disp = (n0 - 0.5f) * 2.0f * dp.x * detailAmt;
+                wy += disp * nrm.y;
+                // Perturb the normal by the noise gradient so lighting
+                // follows the bumps. Central differences, small epsilon.
+                float e = 0.6f;
+                float nx = meshDetailNoise(np + float2(e, 0.0f) + float2(timeOff, 0.0f)) - baseN;
+                float nz = meshDetailNoise(np + float2(0.0f, e) + float2(0.0f, timeOff * 0.7f)) - baseN;
+                float gradScale = dp.x * detailAmt * 2.0f / e;
+                finalNrm = normalize(nrm + float3(-nx * gradScale, 0.0f, -nz * gradScale));
+            }
 
             MTMeshVertexOut v;
             const float4 world = float4(wx, wy, wz, 1.0f);
             v.clipPos = p.viewProj * world;
             v.worldPos = world.xyz;
-            v.normal = nrm;
+            v.normal = finalNrm;
             v.color = rgba.rgb;
             v.material = rgba.a;
             m.set_vertex(tid, v);
@@ -437,6 +510,11 @@ void mesh_terrain_mesh(mesh<MTMeshVertexOut, void, MTMeshPayload,
 /// (per-pixel detail noise + shared lighting/fog). Reads the same
 /// MTUniforms block at fragment buffer(1) the renderer already binds for
 /// the standard path, so no binding changes are needed.
+///
+/// Wireframe mode (uniforms.misc.z > 0.5): instead of raw triangle edges
+/// (the Lego look), draws smooth anti-aliased contour lines that flow
+/// across the terrain with an animated pulse. Much smoother because the
+/// lines follow the terrain surface, not the triangulation.
 fragment float4 mesh_terrain_fragment(MTMeshVaryings in [[stage_in]],
                                       constant MTUniforms &uniforms [[buffer(1)]]) {
     // Per-pixel detail: subtle high-frequency variation breaks up the flat
@@ -447,6 +525,30 @@ fragment float4 mesh_terrain_fragment(MTMeshVaryings in [[stage_in]],
     float detail = mix(n, n2, 0.5) - 0.5;  // -0.5 ... 0.5
     float3 varied = in.color * (1.0 + detail * 0.12);
     float3 col = meshApplyLighting(varied, in.normal, in.worldPos, in.material, uniforms);
+
+    // Smooth animated wireframe overlay.
+    if (uniforms.misc.z > 0.5f) {
+        float time = uniforms.misc.x;
+        // Contour lines: smooth iso-height bands flowing over the surface.
+        // Frequency scales with terrain so lines stay readable at any zoom.
+        float contourFreq = 0.08f;
+        float contour = abs(fract(in.worldPos.y * contourFreq - time * 0.15f) - 0.5f);
+        float contourLine = 1.0f - smoothstep(0.0f, fwidth(in.worldPos.y * contourFreq) * 2.0f + 0.02f, contour);
+        // Grid lines on XZ, anti-aliased via screen-space derivatives.
+        float2 gp = in.worldPos.xz * 0.02f;
+        float2 fw = fwidth(gp) + 1e-4f;
+        float2 g = abs(fract(gp - 0.5f) - 0.5f) / fw;
+        float gridLine = 1.0f - smoothstep(0.0f, 1.2f, min(g.x, g.y));
+        // Animated pulse radiating from the camera, brightening lines.
+        float dist = length(in.worldPos.xz - uniforms.cameraPos.xz);
+        float pulse = sin(dist * 0.03f - time * 2.5f);
+        float glow = smoothstep(0.6f, 1.0f, pulse) * 0.8f + 0.2f;
+        float wire = max(contourLine * 0.9f, gridLine * 0.55f);
+        float3 wireColor = mix(float3(0.2f, 0.9f, 1.0f), float3(1.0f, 1.0f, 1.0f), glow);
+        // Fade with distance so far terrain doesn't shimmer.
+        float fade = 1.0f - smoothstep(800.0f, 2500.0f, dist);
+        col = mix(col, wireColor * (0.6f + glow * 0.6f), wire * fade * 0.85f);
+    }
     return float4(col, 1.0);
 }
 

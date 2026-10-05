@@ -314,7 +314,9 @@ public final class MTTerrainRenderer {
                       time: time)
 
         encoder.setDepthStencilState(depthState)
-        encoder.setTriangleFillMode(wireframe ? .lines : .fill)
+        // Wireframe is now a smooth animated overlay in the fragment shader
+        // (not .lines fill mode, which looked blocky/Lego-like).
+        encoder.setTriangleFillMode(.fill)
         encoder.setCullMode(.back)
 
         // Skybox FIRST: fullscreen sky + sun at the far plane, no depth
@@ -326,7 +328,7 @@ public final class MTTerrainRenderer {
             skybox.sunElevation = self.sunElevation
             skybox.draw(encoder: encoder, viewProjection: viewProj)
             encoder.setDepthStencilState(depthState)
-            encoder.setTriangleFillMode(wireframe ? .lines : .fill)
+            encoder.setTriangleFillMode(.fill)
             encoder.setCullMode(.back)
         }
 
@@ -899,6 +901,10 @@ public final class MTTerrainRenderer {
         uniformBuffer = buf
     }
 
+    /// Procedural 3D geometric detail amount (0=off … 1=full). Displaces
+    /// mesh-shader vertices by material-specific noise for real 3D texture.
+    public var detailAmount: Float = 1.0
+
     private func writeUniforms(slot: Int, model: simd_float4x4, time: Float) {
         let cfg = world.config
         let density = fogEnabled ? cfg.fogDensity : 0
@@ -906,13 +912,15 @@ public final class MTTerrainRenderer {
         let az = sunAzimuth * .pi / 180
         let el = sunElevation * .pi / 180
         let sunDir = SIMD3<Float>(cos(el) * sin(az), sin(el), cos(el) * cos(az))
+        // misc: x=time, y=shaderFX, z=wireframe, w=detailAmount
         let u = MTUniforms(
             viewProj: viewProj,
             model: model,
             cameraPos: SIMD4<Float>(cameraPos, 1),
             fogColor: SIMD4<Float>(cfg.fogColor, density),
             lightDir: SIMD4<Float>(normalize(sunDir), 0.38),
-            misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0, 0, 0)
+            misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0,
+                               wireframe ? 1 : 0, detailAmount)
         )
         var copy = u
         let dst = uniformBuffer.contents().advanced(by: slot * uniformStrideAligned)
