@@ -306,12 +306,80 @@ public final class MTTerrainRenderer {
         let terrainSlot = frameIndex * slotsPerFrame
         let waterSlot = terrainSlot + 1
         let time = Float(Date().timeIntervalSince(startTime))
-        writeUniforms(slot: terrainSlot, model: matrix_identity_float4x4, time: time)
+
+        drawScene(encoder: encoder, viewProj: viewProj, cameraPos: cameraPos,
+                  terrainSlot: terrainSlot, waterSlot: waterSlot, time: time,
+                  includeStructures: true, includeWater: true)
+
+        encoder.endEncoding()
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+
+    /// Renders the scene (skybox + terrain) into an offscreen texture from
+    /// an arbitrary camera. Used for real-time mirror reflections — call
+    /// with a low-resolution texture (e.g. 256x128) for performance.
+    /// Structures and water are skipped for speed; the mirror image is small.
+    public func renderReflection(to texture: MTLTexture,
+                                 from cameraPosition: SIMD3<Float>,
+                                 lookingAt target: SIMD3<Float>,
+                                 fovDegrees: Float = 70) {
+        let w = texture.width, h = texture.height
+        guard w > 0 && h > 0,
+              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+
+        // Depth texture for the reflection pass.
+        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .depth32Float, width: w, height: h, mipmapped: false)
+        depthDesc.storageMode = .private
+        depthDesc.usage = .renderTarget
+        guard let depthTex = device.makeTexture(descriptor: depthDesc) else { return }
+
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.1, green: 0.15, blue: 0.25, alpha: 1)
+        pass.depthAttachment.texture = depthTex
+        pass.depthAttachment.loadAction = .clear
+        pass.depthAttachment.storeAction = .dontCare
+        pass.depthAttachment.clearDepth = 1.0
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+
+        // Mirror camera: aspect from texture dimensions.
+        let aspect = Float(w) / Float(max(h, 1))
+        let mirrorViewProj = mtPerspective(fovDegrees: fovDegrees, aspect: aspect,
+                                           near: 1, far: 20000)
+            * mtLookAt(eye: cameraPosition, target: target)
+
+        // Use a dedicated uniform slot (beyond the frame slots) so the
+        // reflection pass doesn't disturb the main render state.
+        let reflectionSlot = maxFramesInFlight * slotsPerFrame
+        let time = Float(Date().timeIntervalSince(startTime))
+        drawScene(encoder: encoder, viewProj: mirrorViewProj, cameraPos: cameraPosition,
+                  terrainSlot: reflectionSlot, waterSlot: reflectionSlot + 1, time: time,
+                  includeStructures: false, includeWater: false)
+
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    /// Core scene rendering: skybox, terrain chunks, optionally structures
+    /// and water. Shared by `draw(in:)` and `renderReflection(to:from:)`.
+    private func drawScene(encoder: MTLRenderCommandEncoder,
+                           viewProj: simd_float4x4,
+                           cameraPos: SIMD3<Float>,
+                           terrainSlot: Int, waterSlot: Int, time: Float,
+                           includeStructures: Bool, includeWater: Bool) {
+        writeUniforms(slot: terrainSlot, model: matrix_identity_float4x4, time: time,
+                       viewProj: viewProj, cameraPos: cameraPos)
         // Water plane is built around the XZ origin; recenter it under the camera.
         writeUniforms(slot: waterSlot,
                       model: mtTranslation(SIMD3<Float>(lastCameraTarget.x, 0,
                                                         lastCameraTarget.y)),
-                      time: time)
+                      time: time, viewProj: viewProj, cameraPos: cameraPos)
 
         encoder.setDepthStencilState(depthState)
         // Wireframe is now a smooth animated overlay in the fragment shader
@@ -360,26 +428,28 @@ public final class MTTerrainRenderer {
         cacheLock.unlock()
         #endif
 
-        // 1 instanced draw per structure kind.
-        encoder.setRenderPipelineState(structurePipeline)
-        bindUniforms(encoder, slot: terrainSlot)
-        for kind in MTStructureKind.allCases {
-            guard let sm = structureMeshes[kind],
-                  sm.instanceCount > 0,
-                  let instanceBuffer = sm.instanceBuffer
-            else { continue }
-            encoder.setVertexBuffer(sm.vertexBuffer, offset: 0, index: 0)
-            encoder.setVertexBuffer(instanceBuffer, offset: 0, index: 2)
-            encoder.drawIndexedPrimitives(type: .triangle,
-                                          indexCount: sm.indexCount,
-                                          indexType: .uint32,
-                                          indexBuffer: sm.indexBuffer,
-                                          indexBufferOffset: 0,
-                                          instanceCount: sm.instanceCount)
+        // 1 instanced draw per structure kind (skipped for reflections).
+        if includeStructures {
+            encoder.setRenderPipelineState(structurePipeline)
+            bindUniforms(encoder, slot: terrainSlot)
+            for kind in MTStructureKind.allCases {
+                guard let sm = structureMeshes[kind],
+                      sm.instanceCount > 0,
+                      let instanceBuffer = sm.instanceBuffer
+                else { continue }
+                encoder.setVertexBuffer(sm.vertexBuffer, offset: 0, index: 0)
+                encoder.setVertexBuffer(instanceBuffer, offset: 0, index: 2)
+                encoder.drawIndexedPrimitives(type: .triangle,
+                                              indexCount: sm.indexCount,
+                                              indexType: .uint32,
+                                              indexBuffer: sm.indexBuffer,
+                                              indexBufferOffset: 0,
+                                              instanceCount: sm.instanceCount)
+            }
         }
 
-        // 1 draw for water, blended, drawn last.
-        if showsWater, let wvb = waterVertexBuffer, let wib = waterIndexBuffer {
+        // 1 draw for water, blended, drawn last (skipped for reflections).
+        if includeWater, showsWater, let wvb = waterVertexBuffer, let wib = waterIndexBuffer {
             encoder.setRenderPipelineState(waterPipeline)
             encoder.setDepthStencilState(waterDepthState)
             bindUniforms(encoder, slot: waterSlot)
@@ -392,10 +462,6 @@ public final class MTTerrainRenderer {
                                           indexBuffer: wib,
                                           indexBufferOffset: 0)
         }
-
-        encoder.endEncoding()
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
     }
 
     /// Standard-path chunk drawing: one indexed draw per visible chunk.
@@ -905,7 +971,9 @@ public final class MTTerrainRenderer {
     /// mesh-shader vertices by material-specific noise for real 3D texture.
     public var detailAmount: Float = 1.0
 
-    private func writeUniforms(slot: Int, model: simd_float4x4, time: Float) {
+    private func writeUniforms(slot: Int, model: simd_float4x4, time: Float,
+                               viewProj: simd_float4x4? = nil,
+                               cameraPos: SIMD3<Float>? = nil) {
         let cfg = world.config
         let density = fogEnabled ? cfg.fogDensity : 0
         // Sun direction from azimuth/elevation (degrees).
@@ -914,9 +982,9 @@ public final class MTTerrainRenderer {
         let sunDir = SIMD3<Float>(cos(el) * sin(az), sin(el), cos(el) * cos(az))
         // misc: x=time, y=shaderFX, z=wireframe, w=detailAmount
         let u = MTUniforms(
-            viewProj: viewProj,
+            viewProj: viewProj ?? self.viewProj,
             model: model,
-            cameraPos: SIMD4<Float>(cameraPos, 1),
+            cameraPos: SIMD4<Float>(cameraPos ?? self.cameraPos, 1),
             fogColor: SIMD4<Float>(cfg.fogColor, density),
             lightDir: SIMD4<Float>(normalize(sunDir), 0.38),
             misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0,
