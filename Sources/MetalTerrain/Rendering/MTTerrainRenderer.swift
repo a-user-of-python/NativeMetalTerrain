@@ -413,7 +413,7 @@ public final class MTTerrainRenderer {
         // Bind the TLAS for the shadow pass at fragment buffer index 3.
         // The RT fragment variant reads it; terrain_fragment ignores it.
         if let tlas = tlas {
-            encoder.setFragmentAccelerationStructure(tlas, at: 3)
+            encoder.setFragmentAccelerationStructure(tlas, bufferIndex: 3)
         }
         #endif
         cacheLock.lock()
@@ -469,7 +469,7 @@ public final class MTTerrainRenderer {
                                    index: 0)
             encoder.setMeshBuffer(heightmap, offset: 0, index: 0)
             encoder.drawMeshThreadgroups(
-                threadgroupsPerGrid: MTLSize(width: 1, height: 1, depth: 1),
+                MTLSize(width: 1, height: 1, depth: 1),
                 threadsPerObjectThreadgroup: MTLSize(width: 1, height: 1, depth: 1),
                 threadsPerMeshThreadgroup: MTLSize(width: 128, height: 1, depth: 1))
         }
@@ -528,7 +528,7 @@ public final class MTTerrainRenderer {
               let meshFn = library.makeFunction(name: "mesh_terrain_mesh"),
               let fragmentFn = library.makeFunction(name: "mesh_terrain_fragment")
         else { meshShadingPipelineState = nil; return }
-        let d = MTLRenderPipelineDescriptor()
+        let d = MTLMeshRenderPipelineDescriptor()
         d.objectFunction = objectFn
         d.meshFunction = meshFn
         d.fragmentFunction = fragmentFn

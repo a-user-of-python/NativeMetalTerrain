@@ -143,17 +143,17 @@ public final class MTRayTracing {
         return true
     }
 
-    /// Encodes one acceleration-structure build on a blit encoder and waits
-    /// for completion. Returns nil if any step fails.
+    /// Encodes one acceleration-structure build and waits for completion.
+    /// Returns nil if any step fails.
     private func build(descriptor: MTLAccelerationStructureDescriptor,
                        queue: MTLCommandQueue) -> MTLAccelerationStructure? {
         let sizes = device.accelerationStructureSizes(descriptor: descriptor)
         guard sizes.accelerationStructureSize > 0,
               let accel = device.makeAccelerationStructure(size: sizes.accelerationStructureSize),
-              let scratch = device.makeBuffer(length: max(sizes.scratchBufferSize, 1),
+              let scratch = device.makeBuffer(length: max(sizes.buildScratchBufferSize, 1),
                                               options: .storageModePrivate),
               let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeBlitCommandEncoder()
+              let encoder = commandBuffer.makeAccelerationStructureCommandEncoder()
         else { return nil }
         encoder.build(accelerationStructure: accel,
                       descriptor: descriptor,
@@ -180,7 +180,6 @@ public final class MTRayTracing {
         geo.indexBuffer = indexBuffer
         geo.indexBufferOffset = 0
         geo.indexType = .uint32
-        geo.indexCount = indexCount
         geo.triangleCount = indexCount / 3
         let descriptor = MTLPrimitiveAccelerationStructureDescriptor()
         descriptor.geometryDescriptors = [geo]
