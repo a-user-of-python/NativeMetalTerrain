@@ -84,8 +84,9 @@ public enum MTMeshBuilder {
         world: MTTerrainWorld,
         distanceFactor: Float
     ) -> (vertices: [MTVertex], indices: [UInt32]) {
-        // Full res within 40% of view distance, half res beyond.
-        buildGrid(chunk: chunk, world: world, stride: distanceFactor > 0.4 ? 2 : 1)
+        // LOD temporarily disabled: T-junctions cause visible cracks.
+        // TODO: implement border stitching for proper LOD.
+        buildGrid(chunk: chunk, world: world, stride: 1)
     }
 
     // MARK: Water

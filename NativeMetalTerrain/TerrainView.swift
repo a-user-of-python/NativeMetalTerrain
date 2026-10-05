@@ -521,7 +521,11 @@ struct TerrainView: UIViewRepresentable {
                     }
                 }
                 let groundY = world.worldY(forHeight: world.heightAt(x: Double(playerPos.x), z: Double(playerPos.y)))
-                let eyeY = groundY + max(2, parent.playerHeight)
+                // Sample ahead as well: prevents the camera clipping through
+                // uphill terrain when walking up slopes.
+                let aheadPos = playerPos + SIMD2<Float>(sin(walkYaw), cos(walkYaw)) * 8
+                let aheadY = world.worldY(forHeight: world.heightAt(x: Double(aheadPos.x), z: Double(aheadPos.y)))
+                let eyeY = max(groundY, aheadY) + max(2, parent.playerHeight)
                 camPosition = SIMD3<Float>(playerPos.x, eyeY, playerPos.y)
                 let cp = cos(walkPitch)
                 let lookDir = SIMD3<Float>(sin(walkYaw) * cp, sin(walkPitch), cos(walkYaw) * cp)
