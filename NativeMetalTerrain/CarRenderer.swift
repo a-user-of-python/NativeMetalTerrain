@@ -94,12 +94,9 @@ final class CarRenderer {
             col = base * (amb + diff * 1.0);
         } else {
             // Mirror: sample the live reflection texture.
-            // The reflection was rendered from behind the car, so the
-            // center of the texture shows what's behind. Add a slight
-            // offset based on view angle for parallax.
-            float3 viewDir = normalize(in.worldPos - u.camPos.xyz);
-            float2 uv = float2(0.5 + viewDir.x * 0.15, 0.5 - viewDir.y * 0.1);
-            float3 refl = reflectionTex.sample(reflectionSampler, uv).rgb;
+            // The reflection was rendered from behind the car, so it shows
+            // what's behind. Sample directly for a clear mirror image.
+            float3 refl = reflectionTex.sample(reflectionSampler, float2(0.5, 0.5)).rgb;
             // Mirror glass: slightly darkened reflection with a hint of blue.
             col = refl * 0.88 + float3(0.02, 0.03, 0.04);
         }
