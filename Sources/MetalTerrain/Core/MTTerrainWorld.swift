@@ -121,6 +121,24 @@ public final class MTTerrainWorld {
         h * config.heightScale
     }
 
+    /// Finds a safe spawn point: land above sea level, below the mountains.
+    /// Searches a spiral starting at the origin. Returns (0, 0) if nothing
+    /// suitable is found (e.g. an ocean-heavy seed).
+    public func findSafeSpawn() -> SIMD2<Float> {
+        let seaLevel = config.seaLevel
+        for radius: Double in [0, 100, 200, 400, 800, 1600] {
+            for angle in stride(from: 0.0, to: 6.28, by: 0.5) {
+                let x = radius * cos(angle)
+                let z = radius * sin(angle)
+                let h = heightAt(x: x, z: z)
+                if h > seaLevel + 0.05 && h < 0.70 {
+                    return SIMD2<Float>(Float(x), Float(z))
+                }
+            }
+        }
+        return SIMD2<Float>(0, 0)
+    }
+
     // MARK: - Biomes
 
     /// Biome for a normalized height. `height` is clamped to [0, 1].

@@ -107,7 +107,7 @@
 			);
 			mainGroup = A10000000000000000000005;
 			packageReferences = (
-				A40000000000000000000001 /* XCLocalSwiftPackageReference ".." */,
+				A40000000000000000000001 /* XCLocalSwiftPackageReference "." */,
 			);
 			productRefGroup = A10000000000000000000006 /* Products */;
 			projectDirPath = "";
@@ -350,11 +350,11 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A40000000000000000000001 /* XCLocalSwiftPackageReference ".." */ = {isa = XCLocalSwiftPackageReference; relativePath = ".."; };
+		A40000000000000000000001 /* XCLocalSwiftPackageReference "." */ = {isa = XCLocalSwiftPackageReference; relativePath = "."; };
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A40000000000000000000002 /* MetalTerrain */ = {isa = XCSwiftPackageProductDependency; package = A40000000000000000000001 /* XCLocalSwiftPackageReference ".." */; productName = MetalTerrain; };
+		A40000000000000000000002 /* MetalTerrain */ = {isa = XCSwiftPackageProductDependency; package = A40000000000000000000001 /* XCLocalSwiftPackageReference "." */; productName = MetalTerrain; };
 /* End XCSwiftPackageProductDependency section */
 
 	};
