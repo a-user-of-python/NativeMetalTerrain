@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. v0.1.1). Leave empty to auto-increment.'
+        description: 'Release version (e.g. v0.2.0). Leave empty to auto-increment.'
         required: false
         default: ''
   push:
@@ -13,7 +13,7 @@ on:
 
 jobs:
   ios-build:
-    name: Build demo app (unsigned IPA)
+    name: Build app (unsigned IPAs)
     runs-on: macos-15
     permissions:
       contents: write
@@ -42,7 +42,7 @@ jobs:
           else
             LATEST=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
             if [ -z "$LATEST" ]; then
-              VERSION="v0.1.0"
+              VERSION="v0.2.0"
             else
               NUM=${LATEST#v}
               MAJOR=$(echo $NUM | cut -d. -f1)
@@ -53,44 +53,81 @@ jobs:
             fi
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          IPA_NAME="NativeMetalTerrain-${VERSION}.ipa"
-          echo "ipa_name=$IPA_NAME" >> $GITHUB_OUTPUT
-          echo "Releasing $VERSION as $IPA_NAME"
+          echo "standard_ipa=NativeMetalTerrain-${VERSION}.ipa" >> $GITHUB_OUTPUT
+          echo "m3_ipa=NativeMetalTerrain-M3-${VERSION}.ipa" >> $GITHUB_OUTPUT
+          echo "Releasing $VERSION"
 
-      - name: Build (no signing)
+      # ── Standard build (all devices) ──
+      - name: Build standard (no signing)
         run: |
           xcodebuild build \
             -project NativeMetalTerrain.xcodeproj \
             -scheme NativeMetalTerrain \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+            -derivedDataPath build-std \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM=""
 
-      - name: Package unsigned IPA
+      - name: Package standard IPA
         run: |
-          APP=$(find build/Build/Products/Release-iphoneos -name "NativeMetalTerrain.app" -maxdepth 1 | head -1)
-          test -d "$APP" || { echo "missing app"; find build/Build/Products -name "*.app" | head -5; exit 1; }
+          APP=$(find build-std/Build/Products/Release-iphoneos -name "NativeMetalTerrain.app" -maxdepth 1 | head -1)
+          test -d "$APP" || { echo "missing app"; exit 1; }
           mkdir -p Payload
           cp -R "$APP" Payload/
-          zip -r -y "${{ steps.version.outputs.ipa_name }}" Payload
-          rm -rf Payload
+          zip -r -y "${{ steps.version.outputs.standard_ipa }}" Payload
+          rm -rf Payload build-std
 
-      - name: Upload IPA
+      # ── M3+ build (hardware ray tracing + mesh shading) ──
+      - name: Build M3+ (no signing)
+        run: |
+          cat > m3flags.xcconfig << 'EOF'
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) M3_FEATURES
+          MTL_OTHER_CFLAGS = $(inherited) -DM3_FEATURES
+          EOF
+          xcodebuild build \
+            -project NativeMetalTerrain.xcodeproj \
+            -scheme NativeMetalTerrain \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-m3 \
+            -xcconfig m3flags.xcconfig \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=""
+          rm m3flags.xcconfig
+
+      - name: Package M3+ IPA
+        run: |
+          APP=$(find build-m3/Build/Products/Release-iphoneos -name "NativeMetalTerrain.app" -maxdepth 1 | head -1)
+          test -d "$APP" || { echo "missing app"; exit 1; }
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -r -y "${{ steps.version.outputs.m3_ipa }}" Payload
+          rm -rf Payload build-m3
+
+      - name: Upload IPAs
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.version.outputs.ipa_name }}
-          path: ${{ steps.version.outputs.ipa_name }}
+          name: ipas-${{ steps.version.outputs.version }}
+          path: |
+            ${{ steps.version.outputs.standard_ipa }}
+            ${{ steps.version.outputs.m3_ipa }}
 
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ steps.version.outputs.version }}" \
-            "${{ steps.version.outputs.ipa_name }}" \
+            "${{ steps.version.outputs.standard_ipa }}" \
+            "${{ steps.version.outputs.m3_ipa }}" \
             --title "${{ steps.version.outputs.version }}" \
-            --notes "MetalTerrain demo build."
+            --notes "NativeMetalTerrain ${{ steps.version.outputs.version }}
+
+          - **Standard** (${{ steps.version.outputs.standard_ipa }}): all Apple Silicon devices
+          - **M3+** (${{ steps.version.outputs.m3_ipa }}): M3/M4/M5, A17 Pro/A18/A18 Pro/A19/A19 Pro — hardware ray tracing + mesh shading"
