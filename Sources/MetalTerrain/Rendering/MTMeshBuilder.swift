@@ -84,8 +84,9 @@ public enum MTMeshBuilder {
         world: MTTerrainWorld,
         distanceFactor: Float
     ) -> (vertices: [MTVertex], indices: [UInt32]) {
-        // LOD temporarily disabled: T-junctions cause visible cracks.
-        // TODO: implement border stitching for proper LOD.
+        // LOD disabled: T-junction vertex mismatches cause visible cracks.
+        // The 5x build speedup makes full-res everywhere fast enough.
+        // TODO: implement proper border stitching to re-enable LOD.
         buildGrid(chunk: chunk, world: world, stride: 1)
     }
 
@@ -185,15 +186,36 @@ public enum MTMeshBuilder {
                 let height = h(i, j)
 
                 // Central differences of the heightfield -> world-space normal.
-                // One-sided at the chunk border.
-                let iL = max(i - 1, 0), iR = min(i + 1, res - 1)
-                let jD = max(j - 1, 0), jU = min(j + 1, res - 1)
-                let dYdx = cfg.heightScale * (h(iR, j) - h(iL, j)) / (Float(iR - iL) * cell)
-                let dYdz = cfg.heightScale * (h(i, jU) - h(i, jD)) / (Float(jU - jD) * cell)
-                let normal = normalize(SIMD3<Float>(-dYdx, 1.0, -dYdz))
-
+                // At chunk borders, sample the true neighbor height via the
+                // world height function (not clamped) so adjacent chunks
+                // compute identical normals — fixes visible lighting seams.
                 let wx = originX + Float(i) / Float(res - 1) * worldSize
                 let wz = originZ + Float(j) / Float(res - 1) * worldSize
+                let hL: Float, hR: Float, hD: Float, hU: Float
+                if i == 0 {
+                    hL = world.heightAt(x: Double(wx - cell), z: Double(wz))
+                    hR = h(i + 1, j)
+                } else if i == res - 1 {
+                    hL = h(i - 1, j)
+                    hR = world.heightAt(x: Double(wx + cell), z: Double(wz))
+                } else {
+                    hL = h(i - 1, j)
+                    hR = h(i + 1, j)
+                }
+                if j == 0 {
+                    hD = world.heightAt(x: Double(wx), z: Double(wz - cell))
+                    hU = h(i, j + 1)
+                } else if j == res - 1 {
+                    hD = h(i, j - 1)
+                    hU = world.heightAt(x: Double(wx), z: Double(wz + cell))
+                } else {
+                    hD = h(i, j - 1)
+                    hU = h(i, j + 1)
+                }
+                let dYdx = cfg.heightScale * (hR - hL) / (2 * cell)
+                let dYdz = cfg.heightScale * (hU - hD) / (2 * cell)
+                let normal = normalize(SIMD3<Float>(-dYdx, 1.0, -dYdz))
+
                 let wy = height * heightScale
 
                 let (rgb, material) = groundColor(height: height, normalY: normal.y, biomes: biomes)
