@@ -135,6 +135,7 @@ struct TerrainView: UIViewRepresentable {
         var followCamInit = false
         private var carRenderer: CarRenderer?
         private var mirrorReflectionTex: MTLTexture?  // live scene for car mirrors
+        private var reflectionFrameCount = 0  // throttle reflections in simulator
 
         private var parent = TerrainView(
             seed: .constant(1337), rebuildToken: .constant(0),
@@ -564,15 +565,19 @@ struct TerrainView: UIViewRepresentable {
             var carOverlay: ((MTLRenderCommandEncoder) -> Void)?
             if carSpawned {
                 // Live mirror reflection: render the scene from behind the
-                // car into a small texture (updated every frame).
+                // car into a small texture.
                 // In the simulator Metal runs on the CPU in software, so we
-                // use a tiny texture there to avoid pegging the CPU.
+                // use a tiny texture updated every 10th frame to avoid
+                // pegging the CPU.
                 #if targetEnvironment(simulator)
                 let reflW = 32, reflH = 16
+                let updateReflection = (reflectionFrameCount % 10 == 0)
                 #else
                 let reflW = 256, reflH = 128
+                let updateReflection = true
                 #endif
-                if let device {
+                reflectionFrameCount += 1
+                if updateReflection, let device {
                     if mirrorReflectionTex == nil {
                         let desc = MTLTextureDescriptor.texture2DDescriptor(
                             pixelFormat: .bgra8Unorm, width: reflW, height: reflH,
