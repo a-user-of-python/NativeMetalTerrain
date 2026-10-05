@@ -255,7 +255,7 @@ final class CarRenderer {
         // Preserve the terrain pass: load color + depth instead of clearing.
         // (Load actions must be set on the descriptor BEFORE the encoder
         // is created.)
-        let pass = view.currentRenderPassDescriptor
+        guard let pass = view.currentRenderPassDescriptor else { return }
         pass.colorAttachments[0].loadAction = .load
         pass.colorAttachments[0].storeAction = .store
         pass.depthAttachment.loadAction = .load
@@ -266,7 +266,7 @@ final class CarRenderer {
 
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
-        enc.setCullMode(.none)
+        enc.setCullMode(MTLCullMode.none)
 
         let az = sunAzimuth * .pi / 180
         let el = sunElevation * .pi / 180
@@ -280,8 +280,8 @@ final class CarRenderer {
         enc.setVertexBuffer(bodyVB, offset: 0, index: 0)
         enc.setVertexBytes(&bu, length: MemoryLayout<Uniforms>.stride, index: 1)
         enc.setFragmentBytes(&buf, length: MemoryLayout<Uniforms>.stride, index: 1)
-        enc.drawIndexedPrimitives(type: .triangle, indexCount: bodyIndexCount,
-                                  indexType: .uint32,
+        enc.drawIndexedPrimitives(type: MTLPrimitiveType.triangle, indexCount: bodyIndexCount,
+                                  indexType: MTLIndexType.uint32,
                                   indexBuffer: bodyIB, indexBufferOffset: 0)
 
         // Wheels: car transform * offset * steer * spin.
@@ -295,8 +295,8 @@ final class CarRenderer {
             var wuf = wu
             enc.setVertexBytes(&wu, length: MemoryLayout<Uniforms>.stride, index: 1)
             enc.setFragmentBytes(&wuf, length: MemoryLayout<Uniforms>.stride, index: 1)
-            enc.drawIndexedPrimitives(type: .triangle, indexCount: wheelIndexCount,
-                                      indexType: .uint32,
+            enc.drawIndexedPrimitives(type: MTLPrimitiveType.triangle, indexCount: wheelIndexCount,
+                                      indexType: MTLIndexType.uint32,
                                       indexBuffer: wheelIB, indexBufferOffset: 0)
         }
 
