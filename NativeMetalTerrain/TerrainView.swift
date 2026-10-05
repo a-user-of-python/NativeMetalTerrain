@@ -75,7 +75,10 @@ struct TerrainView: UIViewRepresentable {
     /// Eye height above terrain in walk mode (player size).
     @Binding var playerHeight: Float
     /// Joystick input: x = strafe, y = forward (-1...1 each).
+    /// When the debug car is active, x = steering, y = throttle.
     @Binding var moveInput: SIMD2<Float>
+    /// Debug car active (spawned + follow camera).
+    @Binding var carActive: Bool
     /// Called once the Metal renderer exists, so ContentView can push
     /// sun updates directly without a SwiftUI re-render.
     var onRendererReady: ((MTTerrainRenderer) -> Void)?
@@ -121,6 +124,17 @@ struct TerrainView: UIViewRepresentable {
         var walkYaw: Float = 0
         var walkPitch: Float = -0.1
 
+        // Debug car state (app-only).
+        var carSpawned = false
+        var carPos = SIMD2<Float>(0, 0)   // XZ position
+        var carHeading: Float = 0         // yaw; forward = (sin, cos) in XZ
+        var carSpeed: Float = 0           // world units/sec (+ forward)
+        var carSteer: Float = 0           // smoothed -1...1
+        var carWheelSpin: Float = 0       // radians, about the wheel axle
+        var followCamPos = SIMD3<Float>(0, 0, 0)
+        var followCamInit = false
+        private var carRenderer: CarRenderer?
+
         private var parent = TerrainView(
             seed: .constant(1337), rebuildToken: .constant(0),
             preset: .constant(.default), structuresEnabled: .constant(true),
@@ -129,7 +143,8 @@ struct TerrainView: UIViewRepresentable {
             shaderEffectsEnabled: .constant(false),
             dragMode: .constant(.orbit),
             cameraMode: .constant(.walk), playerHeight: .constant(2),
-            moveInput: .constant(SIMD2<Float>(0, 0))
+            moveInput: .constant(SIMD2<Float>(0, 0)),
+            carActive: .constant(false)
         )
         private var device: MTLDevice?
         private var world: MTTerrainWorld?
@@ -220,6 +235,13 @@ struct TerrainView: UIViewRepresentable {
                 lastStructuresEnabled = parent.structuresEnabled
                 world?.structuresEnabled = parent.structuresEnabled
             }
+            // Debug car spawn / despawn.
+            if carSpawned != parent.carActive {
+                carSpawned = parent.carActive
+                if carSpawned {
+                    spawnCar()
+                }
+            }
         }
 
         // MARK: World construction
@@ -271,6 +293,8 @@ struct TerrainView: UIViewRepresentable {
             // ─────────────────────────────────────────────────────────
         }
 
+        // MARK: - Debug car (app-only)
+
         /// Searches a spiral for land above sea level (not water, not steep).
         private func findSafeSpawn(in world: MTTerrainWorld) -> SIMD2<Float> {
             let seaLevel = world.config.seaLevel
@@ -287,6 +311,132 @@ struct TerrainView: UIViewRepresentable {
                 }
             }
             return SIMD2<Float>(0, 0)  // fallback
+        }
+
+        /// Spawns the car at the player's feet (walk) or the camera target
+        /// (orbit), nudged onto nearby land if the spot is water.
+        private func spawnCar() {
+            guard let world, let device else { return }
+            if carRenderer == nil {
+                carRenderer = CarRenderer(device: device)
+            }
+            var spot = parent.cameraMode == .walk
+                ? playerPos
+                : SIMD2<Float>(target.x, target.z)
+            let seaLevel = world.config.seaLevel
+            if world.heightAt(x: Double(spot.x), z: Double(spot.y)) < seaLevel {
+                outer: for radius: Float in [20, 60, 120, 250] {
+                    for angle in stride(from: Float(0), to: Float(6.28), by: Float(0.5)) {
+                        let c = SIMD2<Float>(spot.x + radius * cos(angle),
+                                             spot.y + radius * sin(angle))
+                        if world.heightAt(x: Double(c.x), z: Double(c.y)) >= seaLevel {
+                            spot = c
+                            break outer
+                        }
+                    }
+                }
+            }
+            carPos = spot
+            carHeading = parent.cameraMode == .walk ? walkYaw : 0
+            carSpeed = 0
+            carSteer = 0
+            carWheelSpin = 0
+            followCamInit = false
+        }
+
+        /// World-space Y of the terrain at an XZ point.
+        private func groundY(at p: SIMD2<Float>) -> Float {
+            guard let world else { return 0 }
+            return world.worldY(forHeight: world.heightAt(x: Double(p.x), z: Double(p.y)))
+        }
+
+        /// Terrain normal at the car, from central differences of the
+        /// heightfield. This is what tilts the car onto slopes.
+        private func terrainNormal(at p: SIMD2<Float>) -> SIMD3<Float> {
+            let e: Float = 2.0
+            let hx = groundY(at: SIMD2<Float>(p.x + e, p.y)) - groundY(at: SIMD2<Float>(p.x - e, p.y))
+            let hz = groundY(at: SIMD2<Float>(p.x, p.y + e)) - groundY(at: SIMD2<Float>(p.x, p.y - e))
+            return normalize(SIMD3<Float>(-hx / (2 * e), 1, -hz / (2 * e)))
+        }
+
+        /// Car world transform: origin at the terrain surface under the car
+        /// center, up-axis aligned to the terrain normal (NOT locked
+        /// vertical), forward from the heading projected onto the slope.
+        private func carModelMatrix() -> simd_float4x4 {
+            let n = terrainNormal(at: carPos)
+            let fwd0 = SIMD3<Float>(sin(carHeading), 0, cos(carHeading))
+            var fwd = fwd0 - n * dot(fwd0, n)
+            if length_squared(fwd) < 1e-6 {
+                // Heading straight up a cliff face: fall back to world +Z.
+                fwd = SIMD3<Float>(0, 0, 1) - n * n.z
+            }
+            fwd = normalize(fwd)
+            let right = normalize(cross(n, fwd))
+            let fwd2 = cross(right, n)  // re-orthogonalized
+            let pos = SIMD3<Float>(carPos.x, groundY(at: carPos), carPos.y)
+            var m = matrix_identity_float4x4
+            m.columns.0 = SIMD4<Float>(right, 0)
+            m.columns.1 = SIMD4<Float>(n, 0)
+            m.columns.2 = SIMD4<Float>(fwd2, 0)
+            m.columns.3 = SIMD4<Float>(pos, 1)
+            return m
+        }
+
+        /// Arcade car physics: joystick Y = throttle/brake, X = steering.
+        private func updateCar(dt: Float) {
+            guard let world else { return }
+            let input = parent.moveInput
+            let dt = min(max(dt, 0), 0.1)
+
+            // Steering smoothing (no twitch).
+            carSteer += (input.x - carSteer) * min(1, dt * 8)
+
+            // Throttle / brake / reverse.
+            let accel: Float = 55
+            if input.y > 0.05 {
+                carSpeed += input.y * accel * dt
+            } else if input.y < -0.05 {
+                if carSpeed > 1 {
+                    carSpeed += input.y * accel * 1.8 * dt  // braking
+                } else {
+                    carSpeed += input.y * accel * 0.6 * dt  // reverse
+                }
+            }
+            // Drag + rolling resistance.
+            carSpeed -= carSpeed * 1.1 * dt
+            carSpeed -= (carSpeed >= 0 ? 1 : -1) * 5 * dt
+            if abs(carSpeed) < 0.4 && abs(input.y) < 0.05 { carSpeed = 0 }
+            carSpeed = min(75, max(-25, carSpeed))
+
+            // Steering: tighter at speed, none when stationary.
+            if abs(carSpeed) > 0.5 {
+                // Bicycle-ish yaw rate.
+                let wheelBase: Float = 5.4
+                carHeading += carSteer * CarRenderer.maxSteerAngle
+                    * (carSpeed / wheelBase) * dt
+            }
+
+            // Integrate; block water like walk mode (with axis slide).
+            let fwd = SIMD2<Float>(sin(carHeading), cos(carHeading))
+            let seaLevel = world.config.seaLevel
+            let tryPos = carPos + fwd * carSpeed * dt
+            if world.heightAt(x: Double(tryPos.x), z: Double(tryPos.y)) >= seaLevel {
+                carPos = tryPos
+            } else {
+                carSpeed *= 0.4
+                let tryX = SIMD2<Float>(carPos.x + fwd.x * carSpeed * dt, carPos.y)
+                if world.heightAt(x: Double(tryX.x), z: Double(tryX.y)) >= seaLevel {
+                    carPos = tryX
+                } else {
+                    let tryZ = SIMD2<Float>(carPos.x, carPos.y + fwd.y * carSpeed * dt)
+                    if world.heightAt(x: Double(tryZ.x), z: Double(tryZ.y)) >= seaLevel {
+                        carPos = tryZ
+                    }
+                }
+            }
+
+            // Wheel spin (radius 1.0).
+            carWheelSpin += carSpeed * dt
         }
 
         // MARK: - MTKViewDelegate
@@ -320,7 +470,25 @@ struct TerrainView: UIViewRepresentable {
 
             let camPosition: SIMD3<Float>
             let camTarget: SIMD3<Float>
-            if parent.cameraMode == .walk, let world {
+            if carSpawned {
+                // Debug car: joystick drives + steers; camera follows behind.
+                updateCar(dt: frameDt)
+                let carM = carModelMatrix()
+                let fwd3 = SIMD3<Float>(carM.columns.2.x, carM.columns.2.y, carM.columns.2.z)
+                let up3 = SIMD3<Float>(carM.columns.1.x, carM.columns.1.y, carM.columns.1.z)
+                let carPos3 = SIMD3<Float>(carM.columns.3.x, carM.columns.3.y, carM.columns.3.z)
+                let desired = carPos3 - fwd3 * 26 + up3 * 11
+                if !followCamInit {
+                    followCamPos = desired
+                    followCamInit = true
+                }
+                let k = 1 - exp(-4.5 * min(max(frameDt, 0), 0.1))
+                followCamPos = mix(followCamPos, desired, t: k)
+                camPosition = followCamPos
+                camTarget = carPos3 + fwd3 * 8 + up3 * 3
+                // Keep the chunk streamer centered on the car.
+                target = carPos3
+            } else if parent.cameraMode == .walk, let world {
                 // Walk mode: first-person. Joystick moves the player on XZ;
                 // Y follows the terrain height + eye height (player size).
                 let input = parent.moveInput
@@ -382,6 +550,47 @@ struct TerrainView: UIViewRepresentable {
                                near: 1, far: 4000)
             renderer.update(cameraTarget: SIMD2<Float>(target.x, target.z))
             renderer.draw(in: view)
+
+            // Debug car overlay pass (app-only): drawn after the library's
+            // pass on the same drawable with load actions.
+            if carSpawned {
+                let viewProj = carPerspective(fovDegrees: 55, aspect: aspect,
+                                              near: 1, far: 4000)
+                    * carLookAt(eye: camPosition, target: camTarget)
+                carRenderer?.draw(in: view,
+                                  viewProj: viewProj,
+                                  sunAzimuth: renderer.sunAzimuth,
+                                  sunElevation: renderer.sunElevation,
+                                  carModel: carModelMatrix(),
+                                  wheelSpin: carWheelSpin,
+                                  steer: carSteer)
+            }
+        }
+
+        // MARK: - Car camera math (mirrors the library's mtPerspective/mtLookAt)
+
+        private func carLookAt(eye: SIMD3<Float>, target: SIMD3<Float>,
+                               up: SIMD3<Float> = SIMD3<Float>(0, 1, 0)) -> simd_float4x4 {
+            let z = normalize(eye - target)
+            let x = normalize(cross(up, z))
+            let y = cross(z, x)
+            var m = matrix_identity_float4x4
+            m.columns.0 = SIMD4<Float>(x.x, y.x, z.x, 0)
+            m.columns.1 = SIMD4<Float>(x.y, y.y, z.y, 0)
+            m.columns.2 = SIMD4<Float>(x.z, y.z, z.z, 0)
+            m.columns.3 = SIMD4<Float>(-dot(x, eye), -dot(y, eye), -dot(z, eye), 1)
+            return m
+        }
+
+        private func carPerspective(fovDegrees: Float, aspect: Float,
+                                    near: Float, far: Float) -> simd_float4x4 {
+            let f: Float = 1.0 / tan(fovDegrees * .pi / 360.0)
+            var m = matrix_identity_float4x4
+            m.columns.0 = SIMD4<Float>(f / aspect, 0, 0, 0)
+            m.columns.1 = SIMD4<Float>(0, f, 0, 0)
+            m.columns.2 = SIMD4<Float>(0, 0, far / (near - far), -1)
+            m.columns.3 = SIMD4<Float>(0, 0, (far * near) / (near - far), 0)
+            return m
         }
 
         // MARK: - Gestures

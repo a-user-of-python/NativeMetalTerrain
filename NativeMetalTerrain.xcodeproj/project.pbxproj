@@ -12,6 +12,8 @@
 		A30000000000000000000022 /* TerrainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000012 /* TerrainView.swift */; };
 		A30000000000000000000023 /* ControlPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000013 /* ControlPanel.swift */; };
 		A30000000000000000000025 /* JoystickView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000015 /* JoystickView.swift */; };
+		A30000000000000000000026 /* CarRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000016 /* CarRenderer.swift */; };
+		A30000000000000000000027 /* DebugPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000017 /* DebugPanel.swift */; };
 		A30000000000000000000024 /* MetalTerrain in Frameworks */ = {isa = PBXBuildFile; productRef = A40000000000000000000002 /* MetalTerrain */; };
 /* End PBXBuildFile section */
 
@@ -22,6 +24,8 @@
 		A30000000000000000000012 /* TerrainView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerrainView.swift; sourceTree = "<group>"; };
 		A30000000000000000000013 /* ControlPanel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ControlPanel.swift; sourceTree = "<group>"; };
 		A30000000000000000000015 /* JoystickView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = JoystickView.swift; sourceTree = "<group>"; };
+		A30000000000000000000016 /* CarRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CarRenderer.swift; sourceTree = "<group>"; };
+		A30000000000000000000017 /* DebugPanel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DebugPanel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,6 +64,8 @@
 				A30000000000000000000012 /* TerrainView.swift */,
 				A30000000000000000000013 /* ControlPanel.swift */,
 				A30000000000000000000015 /* JoystickView.swift */,
+				A30000000000000000000016 /* CarRenderer.swift */,
+				A30000000000000000000017 /* DebugPanel.swift */,
 			);
 			path = NativeMetalTerrain;
 			sourceTree = "<group>";
@@ -138,6 +144,8 @@
 				A30000000000000000000022 /* TerrainView.swift in Sources */,
 				A30000000000000000000023 /* ControlPanel.swift in Sources */,
 				A30000000000000000000025 /* JoystickView.swift in Sources */,
+				A30000000000000000000026 /* CarRenderer.swift in Sources */,
+				A30000000000000000000027 /* DebugPanel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

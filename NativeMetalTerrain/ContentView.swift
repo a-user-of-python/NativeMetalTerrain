@@ -25,6 +25,8 @@ struct ContentView: View {
     @State private var usesMetal4 = false
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
+    /// Debug car (separate debug panel, app-only).
+    @State private var carActive = false
 
     var body: some View {
         GeometryReader { geo in
@@ -44,6 +46,7 @@ struct ContentView: View {
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
                     moveInput: $moveInput,
+                    carActive: $carActive,
                     onRendererReady: { renderer in
                         // Dispatch async: setting @State during updateUIView
                         // triggers "modifying state during view update".
@@ -101,8 +104,20 @@ struct ContentView: View {
                     }
                 }
 
-                // Walk-mode joystick (bottom-left, only in walk mode)
-                // Joystick: walk mode (move player) and orbit mode (move target).
+                // Debug panel (top-left, separate from control panel)
+                VStack {
+                    HStack {
+                        DebugPanel(carActive: $carActive)
+                            .frame(width: 230)
+                            .padding(.leading, 12)
+                            .padding(.top, 12)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+
+                // Joystick (bottom-left): walk mode moves the player,
+                // orbit mode moves the camera target, car mode drives.
                 VStack {
                     Spacer()
                     HStack {
