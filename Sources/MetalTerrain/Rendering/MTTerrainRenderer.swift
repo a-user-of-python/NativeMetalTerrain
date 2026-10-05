@@ -263,11 +263,11 @@ public final class MTTerrainRenderer {
 
         #if M3_FEATURES
         // Refresh the ray-tracing TLAS from the currently cached chunk
-        // meshes. MTRayTracing skips the rebuild when the chunk set and
-        // transforms are unchanged, so this is cheap once streaming
-        // settles. Chunk vertices are world-space, so instance transforms
-        // are identity.
-        if let rt = rayTracing {
+        // meshes. Throttled to every 15 frames to avoid lag spikes during
+        // streaming (TLAS rebuilds are expensive with full-res chunks).
+        // MTRayTracing skips the rebuild when the chunk set is unchanged.
+        tlasFrameCounter += 1
+        if let rt = rayTracing, tlasFrameCounter % 15 == 0 {
             cacheLock.lock()
             let rtChunks = chunkCache.map { (coord, mesh) in
                 (id: coord.hashValue,
@@ -809,6 +809,7 @@ public final class MTTerrainRenderer {
     }
     private var structureMeshes: [MTStructureKind: StructureMesh] = [:]
     private var structureChunkSet = Set<MTChunkCoord>()
+    private var tlasFrameCounter = 0
     private var structuresWereEnabled = true
 
     private var viewConfigured = false
