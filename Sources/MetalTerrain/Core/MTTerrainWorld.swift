@@ -184,6 +184,10 @@ public final class MTTerrainWorld {
         config.biomes = MTBiome.default
     }
 
+    /// All biomes in lookup order (custom first, then config biomes) — the
+    /// same order `biomeAt` consults. Used by the mesh-shader biome table.
+    public var allBiomes: [MTBiome] { customBiomes + config.biomes }
+
     // MARK: - Chunks
 
     /// Generate a chunk's heightmap. Deterministic: the same seed,

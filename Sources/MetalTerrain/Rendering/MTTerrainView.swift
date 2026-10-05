@@ -127,8 +127,23 @@ public final class MTTerrainView: MTKView {
         set { renderer?.viewDistance = newValue }
     }
 
+    /// The skybox (sky + visible sun). Nil until `world` is assigned.
+    public var skybox: MTSkybox? { renderer?.skybox }
+
     /// True when the Metal 4 pipeline is active (false = Metal 3 fallback).
     public var usesMetal4: Bool { renderer?.usesMetal4 ?? false }
+
+    #if M3_FEATURES
+    /// Master switch for the mesh-shading path (M3+/A17 Pro+ only).
+    public var meshShadingEnabled: Bool {
+        get { renderer?.meshShadingEnabled ?? false }
+        set { renderer?.meshShadingEnabled = newValue }
+    }
+    /// True when hardware ray tracing is active this frame.
+    public var rayTracingActive: Bool {
+        renderer?.rayTracing?.topLevelStructure != nil
+    }
+    #endif
 }
 
 // MARK: - MTKViewDelegate

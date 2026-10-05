@@ -162,3 +162,51 @@ fragment float4 structure_fragment(MTVaryings in [[stage_in]],
     float3 col = applyLighting(in.color, in.normal, in.worldPos, in.material, uniforms);
     return float4(col, 1.0);
 }
+
+#ifdef M3_FEATURES
+// ---- Hardware ray-traced sun shadows (M3+/A17 Pro+) ----
+// Bind the TLAS with `encoder.setFragmentAccelerationStructure(tlas, at: 3)`.
+
+#include <metal_raytracing>
+using namespace metal::raytracing;
+
+/// Hard shadow test against the terrain TLAS. Returns 1.0 when the segment
+/// from `origin` along `dir` (length `maxDistance`) hits terrain, else 0.0.
+inline float rt_shadow_occlusion(instance_acceleration_structure tlas,
+                                 float3 origin,
+                                 float3 dir,
+                                 float maxDistance) {
+    intersector<instancing, triangle_data> trace;
+    trace.assume_geometry_type(geometry_type::triangle);
+    trace.force_opacity(forced_opacity::opaque);
+    trace.accept_any_intersection(true);
+    ray r;
+    r.origin = origin;
+    r.direction = dir;
+    r.min_distance = 0.05;
+    r.max_distance = maxDistance;
+    intersector<instancing, triangle_data>::result_type hit;
+    trace.intersect(r, tlas, hit);
+    return (hit.distance < maxDistance - 0.001) ? 1.0 : 0.0;
+}
+
+/// Terrain fragment with ray-traced sun shadows. Identical to
+/// terrain_fragment except the direct sun term is shadowed by the TLAS.
+fragment float4 terrain_fragment_rt(MTVaryings in [[stage_in]],
+                                    constant MTUniforms &uniforms [[buffer(1)]],
+                                    instance_acceleration_structure tlas [[buffer(3)]]) {
+    float3 p = in.worldPos * 0.35;
+    float n = fract(sin(dot(floor(p.xz), float2(12.9898, 78.233))) * 43758.5453);
+    float n2 = fract(sin(dot(floor(p.xz) + 1.0, float2(12.9898, 78.233))) * 43758.5453);
+    float detail = mix(n, n2, 0.5) - 0.5;
+    float3 varied = in.color * (1.0 + detail * 0.12);
+    // Shadow ray toward the sun; offset along the normal to avoid self-hits.
+    float3 sunDir = normalize(uniforms.lightDir.xyz);
+    float shadow = rt_shadow_occlusion(tlas, in.worldPos + in.normal * 0.5,
+                                       sunDir, 2000.0);
+    float3 col = applyLighting(varied, in.normal, in.worldPos, in.material, uniforms);
+    // Darken the sun-lit contribution when occluded (keep ambient).
+    col *= (1.0 - shadow * 0.65);
+    return float4(col, 1.0);
+}
+#endif // M3_FEATURES

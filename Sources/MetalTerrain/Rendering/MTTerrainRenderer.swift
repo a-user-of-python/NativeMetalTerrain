@@ -100,7 +100,12 @@ public final class MTTerrainRenderer {
     // MARK: Public API (exact per DESIGN.md)
 
     public var world: MTTerrainWorld {
-        didSet { invalidateCaches() }
+        didSet {
+            invalidateCaches()
+            #if M3_FEATURES
+            rebuildBiomeTable()
+            #endif
+        }
     }
 
     public var wireframe: Bool = false
@@ -113,6 +118,15 @@ public final class MTTerrainRenderer {
     public var currentFPS: Double = 0
     /// Enhanced shader effects (specular + fresnel). Default off.
     public var shaderEffectsEnabled: Bool = false
+    /// Skybox (sky gradient + visible sun), drawn first each frame.
+    /// Created by default; set to nil to disable. The sun position mirrors
+    /// `sunAzimuth`/`sunElevation` automatically.
+    public var skybox: MTSkybox?
+    /// Hardware ray-traced shadow acceleration structures (M3+/A17 Pro+).
+    /// Nil when the device lacks hardware ray tracing or the build omits
+    /// the M3_FEATURES compilation condition. Created in `init`; the TLAS
+    /// is refreshed in `update(cameraTarget:)` as chunks stream.
+    public var rayTracing: MTRayTracing?
     /// Render distance in chunks (radius). Changing this updates the world
     /// config, which triggers a cache invalidation and rebuild.
     public var viewDistance: Int {
@@ -142,6 +156,18 @@ public final class MTTerrainRenderer {
         buildUniformBuffer()
         buildWaterMesh()
         loadStructureMeshes()
+        // Skybox works on all devices (standard Metal 3).
+        self.skybox = MTSkybox(device: device)
+        #if M3_FEATURES
+        // Ray tracing: hardware only, M3+/A17 Pro+. Nil on older GPUs.
+        let rt = MTRayTracing(device: device)
+        rayTracing = rt.isSupported ? rt : nil
+        precondition(MemoryLayout<MTMeshChunkParams>.stride == 40,
+                     "MTMeshChunkParams layout drifted from MTMeshShaders.metal")
+        precondition(MemoryLayout<MTMeshBiomeGPU>.stride == 48,
+                     "MTMeshBiomeGPU layout drifted from MTMeshShaders.metal")
+        rebuildBiomeTable()
+        #endif
     }
 
     public func setCamera(position: SIMD3<Float>, target: SIMD3<Float>,
@@ -221,6 +247,26 @@ public final class MTTerrainRenderer {
             buildChunkAsync(coord, cameraTarget: cameraTarget)
         }
 
+        #if M3_FEATURES
+        // Refresh the ray-tracing TLAS from the currently cached chunk
+        // meshes. MTRayTracing skips the rebuild when the chunk set and
+        // transforms are unchanged, so this is cheap once streaming
+        // settles. Chunk vertices are world-space, so instance transforms
+        // are identity.
+        if let rt = rayTracing {
+            cacheLock.lock()
+            let rtChunks = chunkCache.map { (coord, mesh) in
+                (id: coord.hashValue,
+                 vertexBuffer: mesh.vertexBuffer,
+                 indexBuffer: mesh.indexBuffer,
+                 indexCount: mesh.indexCount,
+                 transform: matrix_identity_float4x4)
+            }
+            cacheLock.unlock()
+            rt.update(chunks: rtChunks)
+        }
+        #endif
+
         // Rebuild structure instances only when the visible chunk set changes.
         // Track enabled state separately to force rebuild on toggle.
         if world.structuresEnabled {
@@ -271,12 +317,34 @@ public final class MTTerrainRenderer {
         encoder.setTriangleFillMode(wireframe ? .lines : .fill)
         encoder.setCullMode(.back)
 
+        // Skybox FIRST: fullscreen sky + sun at the far plane, no depth
+        // writes. Terrain drawn afterward occludes it with normal depth.
+        // (Skybox sets its own depth/cull state; terrain state is set above
+        // and re-applied below, so wireframe mode never affects the sky.)
+        if let skybox = skybox {
+            skybox.sunAzimuth = self.sunAzimuth
+            skybox.sunElevation = self.sunElevation
+            skybox.draw(encoder: encoder, viewProjection: viewProj)
+            encoder.setDepthStencilState(depthState)
+            encoder.setTriangleFillMode(wireframe ? .lines : .fill)
+            encoder.setCullMode(.back)
+        }
+
         // 1 draw call per chunk. Iterate under the lock instead of
         // copying to an Array every frame (was a 60fps allocation).
         // Frustum culling: skip chunks outside the camera view.
+        let frustum = Frustum(viewProj: viewProj)
+        #if M3_FEATURES
+        if meshShadingActive {
+            drawChunksMeshShading(encoder: encoder, slot: terrainSlot,
+                                  frustum: frustum)
+        } else {
+            drawChunksStandard(encoder: encoder, slot: terrainSlot,
+                               frustum: frustum)
+        }
+        #else
         encoder.setRenderPipelineState(terrainPipeline)
         bindUniforms(encoder, slot: terrainSlot)
-        let frustum = Frustum(viewProj: viewProj)
         cacheLock.lock()
         for mesh in chunkCache.values {
             guard frustum.intersects(min: mesh.boundsMin, max: mesh.boundsMax) else { continue }
@@ -288,6 +356,7 @@ public final class MTTerrainRenderer {
                                           indexBufferOffset: 0)
         }
         cacheLock.unlock()
+        #endif
 
         // 1 instanced draw per structure kind.
         encoder.setRenderPipelineState(structurePipeline)
@@ -327,11 +396,189 @@ public final class MTTerrainRenderer {
         commandBuffer.commit()
     }
 
+    /// Standard-path chunk drawing: one indexed draw per visible chunk.
+    private func drawChunksStandard(encoder: MTLRenderCommandEncoder,
+                                    slot: Int, frustum: Frustum) {
+        #if M3_FEATURES
+        // Use the ray-traced shadow pipeline when the TLAS is ready.
+        let tlas = rayTracing?.topLevelStructure
+        let pipeline = (tlas != nil) ? (terrainPipelineRT ?? terrainPipeline)
+                                     : terrainPipeline
+        #else
+        let pipeline = terrainPipeline
+        #endif
+        encoder.setRenderPipelineState(pipeline)
+        bindUniforms(encoder, slot: slot)
+        #if M3_FEATURES
+        // Bind the TLAS for the shadow pass at fragment buffer index 3.
+        // The RT fragment variant reads it; terrain_fragment ignores it.
+        if let tlas = tlas {
+            encoder.setFragmentAccelerationStructure(tlas, at: 3)
+        }
+        #endif
+        cacheLock.lock()
+        for mesh in chunkCache.values {
+            guard frustum.intersects(min: mesh.boundsMin, max: mesh.boundsMax)
+            else { continue }
+            encoder.setVertexBuffer(mesh.vertexBuffer, offset: 0, index: 0)
+            encoder.drawIndexedPrimitives(type: .triangle,
+                                          indexCount: mesh.indexCount,
+                                          indexType: .uint32,
+                                          indexBuffer: mesh.indexBuffer,
+                                          indexBufferOffset: 0)
+        }
+        cacheLock.unlock()
+    }
+
+    #if M3_FEATURES
+    /// Mesh-shading chunk pass: one `drawMeshThreadgroups` per visible chunk.
+    /// The object shader culls and sizes the tile grid; the mesh shader
+    /// expands the chunk's heightmap into vertices on-GPU.
+    private func drawChunksMeshShading(encoder: MTLRenderCommandEncoder,
+                                       slot: Int, frustum: Frustum) {
+        guard let pipeline = meshShadingPipelineState else {
+            drawChunksStandard(encoder: encoder, slot: slot, frustum: frustum)
+            return
+        }
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setFragmentBuffer(uniformBuffer,
+                                  offset: slot * uniformStrideAligned, index: 1)
+        encoder.setObjectBuffer(uniformBuffer,
+                                offset: slot * uniformStrideAligned, index: 1)
+        encoder.setMeshBuffer(biomeTableBuffer, offset: 0, index: 1)
+        var biomeCount = UInt32(biomeTable.count)
+        encoder.setMeshBytes(&biomeCount,
+                             length: MemoryLayout<UInt32>.stride, index: 2)
+        let cfg = world.config
+        cacheLock.lock()
+        for (coord, mesh) in chunkCache {
+            guard frustum.intersects(min: mesh.boundsMin, max: mesh.boundsMax),
+                  let heightmap = mesh.heightmapBuffer else { continue }
+            var params = MTMeshChunkParams(
+                chunkOrigin: SIMD2<Float>(Float(coord.x) * cfg.chunkWorldSize,
+                                          Float(coord.z) * cfg.chunkWorldSize),
+                worldSize: cfg.chunkWorldSize,
+                heightScale: cfg.heightScale,
+                resolution: Float(mesh.heightmapResolution),
+                lodStride: mesh.lodStride,
+                minY: mesh.boundsMin.y,
+                maxY: mesh.boundsMax.y,
+                pad: SIMD2<Float>(0, 0))
+            encoder.setObjectBytes(&params,
+                                   length: MemoryLayout<MTMeshChunkParams>.stride,
+                                   index: 0)
+            encoder.setMeshBuffer(heightmap, offset: 0, index: 0)
+            encoder.drawMeshThreadgroups(
+                threadgroupsPerGrid: MTLSize(width: 1, height: 1, depth: 1),
+                threadsPerObjectThreadgroup: MTLSize(width: 1, height: 1, depth: 1),
+                threadsPerMeshThreadgroup: MTLSize(width: 128, height: 1, depth: 1))
+        }
+        cacheLock.unlock()
+    }
+    #endif
+
     // MARK: - Metal 4 detection
 
     /// True when the Metal 4 pipeline path was taken (iOS 26+, device
     /// supports it, and compilation succeeded). Otherwise Metal 3.
     public private(set) var usesMetal4: Bool = false
+
+    #if M3_FEATURES
+    /// Mesh-shading pipeline (object + mesh + fragment). Nil when the GPU
+    /// lacks mesh shading or compilation failed — falls back to standard.
+    private var meshShadingPipelineState: MTLRenderPipelineState?
+    /// Master switch for the mesh-shading path. Engages only when the build
+    /// has M3_FEATURES, the GPU is Apple9+, and the pipeline compiled.
+    public var meshShadingEnabled: Bool = true
+    /// Constant biome color table for the mesh shader.
+    private var biomeTableBuffer: MTLBuffer!
+    private var biomeTable: [MTMeshBiomeGPU] = []
+
+    /// True when the mesh-shading path can be used this frame.
+    private var meshShadingActive: Bool {
+        meshShadingEnabled
+            && MTCapabilities.supportsMeshShading(device: device)
+            && meshShadingPipelineState != nil
+    }
+
+    /// Must match `MTMeshChunkParams` in MTMeshShaders.metal (40 bytes).
+    private struct MTMeshChunkParams {
+        var chunkOrigin: SIMD2<Float>
+        var worldSize: Float
+        var heightScale: Float
+        var resolution: Float
+        var lodStride: Float
+        var minY: Float
+        var maxY: Float
+        var pad: SIMD2<Float>
+    }
+
+    /// Must match `MTMeshBiome` in MTMeshShaders.metal (48 bytes).
+    private struct MTMeshBiomeGPU {
+        var groundAndMin: SIMD4<Float>
+        var slopeAndMax: SIMD4<Float>
+        var ids: SIMD4<Float>
+    }
+
+    /// Compiles the object/mesh/fragment pipeline. Best-effort: any failure
+    /// leaves `meshShadingPipelineState` nil and the standard path is used.
+    private func buildMeshShadingPipelines(library: MTLLibrary) {
+        guard MTCapabilities.supportsMeshShading(device: device),
+              let objectFn = library.makeFunction(name: "mesh_terrain_object"),
+              let meshFn = library.makeFunction(name: "mesh_terrain_mesh"),
+              let fragmentFn = library.makeFunction(name: "mesh_terrain_fragment")
+        else { meshShadingPipelineState = nil; return }
+        let d = MTLRenderPipelineDescriptor()
+        d.objectFunction = objectFn
+        d.meshFunction = meshFn
+        d.fragmentFunction = fragmentFn
+        guard let color0 = d.colorAttachments[0] else {
+            meshShadingPipelineState = nil; return
+        }
+        color0.pixelFormat = .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        do {
+            meshShadingPipelineState = try device.makeRenderPipelineState(descriptor: d)
+        } catch {
+            meshShadingPipelineState = nil
+        }
+    }
+
+    /// Packs the biome ladder (custom first, then config — same order as
+    /// `biomeAt`) into the constant table the mesh shader colors with.
+    private func buildBiomeTable(world: MTTerrainWorld) -> [MTMeshBiomeGPU] {
+        var out: [MTMeshBiomeGPU] = []
+        for biome in world.allBiomes.prefix(16) {
+            let slope = biome.slopeColor ?? biome.groundColor
+            let material: Float
+            switch biome.name {
+            case "deepOcean", "ocean": material = 5
+            case "beach": material = 2
+            case "mountain": material = 1
+            case "snowyPeak": material = 3
+            default: material = 0
+            }
+            out.append(MTMeshBiomeGPU(
+                groundAndMin: SIMD4<Float>(biome.groundColor, biome.minHeight),
+                slopeAndMax: SIMD4<Float>(slope, biome.maxHeight),
+                ids: SIMD4<Float>(material,
+                                  biome.emitsLight ? 1 : 0,
+                                  biome.slopeColor != nil ? 1 : 0,
+                                  biome.name == "snowyPeak" ? 1 : 0)))
+        }
+        return out
+    }
+
+    /// (Re)builds the mesh-shader biome table. Call from init and whenever
+    /// the world or its biomes change.
+    private func rebuildBiomeTable() {
+        biomeTable = buildBiomeTable(world: world)
+        biomeTableBuffer = biomeTable.withUnsafeBytes { ptr in
+            device.makeBuffer(bytes: ptr.baseAddress!, length: max(ptr.count, 1),
+                              options: .storageModeShared)!
+        }
+    }
+    #endif
 
     // MARK: - Internals
 
@@ -341,6 +588,11 @@ public final class MTTerrainRenderer {
     private var terrainPipeline: MTLRenderPipelineState!
     private var waterPipeline: MTLRenderPipelineState!
     private var structurePipeline: MTLRenderPipelineState!
+    #if M3_FEATURES
+    /// Ray-traced shadow variant of the terrain pipeline. Nil when the
+    /// RT fragment function failed to compile; falls back to terrainPipeline.
+    private var terrainPipelineRT: MTLRenderPipelineState?
+    #endif
     private var depthState: MTLDepthStencilState!
     private var waterDepthState: MTLDepthStencilState!
 
@@ -376,6 +628,14 @@ public final class MTTerrainRenderer {
         /// World-space AABB for frustum culling.
         var boundsMin: SIMD3<Float>
         var boundsMax: SIMD3<Float>
+        #if M3_FEATURES
+        /// Raw heightmap for the mesh-shading path (GPU expands vertices).
+        /// Nil when the mesh path is unavailable; the standard path ignores it.
+        var heightmapBuffer: MTLBuffer?
+        var heightmapResolution: Int = 0
+        /// Grid stride for LOD subsampling in the mesh shader (1 = full).
+        var lodStride: Float = 1
+        #endif
     }
 
     /// Camera frustum planes extracted from the view-projection matrix.
@@ -467,6 +727,10 @@ public final class MTTerrainRenderer {
 
     private func buildPipelines() {
         let library = defaultLibrary()
+        #if M3_FEATURES
+        // Mesh-shading pipeline (best-effort; nil on failure or older GPU).
+        buildMeshShadingPipelines(library: library)
+        #endif
         // Metal 4 needs Apple Silicon (the MTL4* types don't exist in the
         // Intel SDK). On arm64 with iOS 26 / macOS 26+, try Metal 4 first.
         #if arch(arm64)
@@ -513,6 +777,17 @@ public final class MTTerrainRenderer {
                 descriptor: descriptor(vertex: "terrain_vertex", fragment: "water_fragment", blending: true))
             structurePipeline = try device.makeRenderPipelineState(
                 descriptor: descriptor(vertex: "structure_vertex", fragment: "structure_fragment", blending: false))
+            #if M3_FEATURES
+            // Ray-traced shadow variant of the terrain pipeline. Best-effort:
+            // nil when the function is missing (older .metallib) — the
+            // standard pipeline is used instead.
+            if library.makeFunction(name: "terrain_fragment_rt") != nil {
+                terrainPipelineRT = try device.makeRenderPipelineState(
+                    descriptor: descriptor(vertex: "terrain_vertex",
+                                           fragment: "terrain_fragment_rt",
+                                           blending: false))
+            }
+            #endif
         } catch {
             preconditionFailure("MTTerrainRenderer: pipeline creation failed: \(error)")
         }
@@ -659,7 +934,13 @@ public final class MTTerrainRenderer {
             let dist = hypot(cx - cameraTarget.x, cz - cameraTarget.y)
             let distanceFactor = dist / (Float(self.world.config.viewDistance) * size)
             // LOD: far chunks generate at half resolution (4x fewer noise evals).
+            // On the M3 mesh-shading path the GPU subsamples via lodStride, so
+            // keep full resolution and let the mesh shader do the LOD work.
+            #if M3_FEATURES
+            let resScale: Float = 1.0
+            #else
             let resScale: Float = distanceFactor > 0.4 ? 0.5 : 1.0
+            #endif
             let chunk = self.world.generateChunk(at: coord, resolutionScale: resScale)
             let mesh = MTMeshBuilder.buildLOD(for: chunk, world: self.world,
                                               distanceFactor: distanceFactor)
@@ -670,6 +951,10 @@ public final class MTTerrainRenderer {
                 self.cacheLock.unlock()
                 return
             }
+            #if M3_FEATURES
+            // Heightmap buffer for the mesh-shading path (GPU vertex expansion).
+            let hb = self.sharedBuffer(from: chunk.heights)
+            #endif
             self.cacheLock.lock()
             // Drop stale builds: config changed while we were generating.
             if generation == self.buildGeneration {
@@ -686,7 +971,13 @@ public final class MTTerrainRenderer {
                     indexCount: mesh.indices.count,
                     lastUsed: Date().timeIntervalSince1970,
                     boundsMin: SIMD3<Float>(x0, min(y0, y1) - 20, z0),
-                    boundsMax: SIMD3<Float>(x0 + size, max(y0, y1) + 20, z0 + size))
+                    boundsMax: SIMD3<Float>(x0 + size, max(y0, y1) + 20, z0 + size)
+                    #if M3_FEATURES
+                    , heightmapBuffer: hb,
+                    heightmapResolution: chunk.resolution,
+                    lodStride: distanceFactor > 0.4 ? 2 : 1
+                    #endif
+                )
             }
             self.pendingBuilds.remove(coord)
             self.cacheLock.unlock()
