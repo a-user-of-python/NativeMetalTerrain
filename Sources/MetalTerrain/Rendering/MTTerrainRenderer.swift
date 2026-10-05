@@ -455,7 +455,10 @@ public final class MTTerrainRenderer {
         #endif
 
         // 1 instanced draw per structure kind (skipped for reflections).
+        // Structures use no culling: some generated triangles may have
+        // inconsistent winding, and double-sided is safer than invisible.
         if includeStructures {
+            encoder.setCullMode(.none)
             encoder.setRenderPipelineState(structurePipeline)
             bindUniforms(encoder, slot: terrainSlot)
             for kind in MTStructureKind.allCases {
@@ -472,6 +475,7 @@ public final class MTTerrainRenderer {
                                               indexBufferOffset: 0,
                                               instanceCount: sm.instanceCount)
             }
+            encoder.setCullMode(.back)  // restore for water/terrain
         }
 
         // 1 draw for water, blended, drawn last (skipped for reflections).
