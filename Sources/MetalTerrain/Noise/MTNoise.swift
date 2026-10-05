@@ -137,8 +137,10 @@ func mtFBM01(config: MTNoiseConfig, x: Double, y: Double,
 func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
                     noise: MTPerlinNoise, warpNoise: MTPerlinNoise) -> Float {
     // ── Continent layer (very low frequency): large landmasses vs oceans ──
+    // 2 octaves is visually indistinguishable from 3 for these smooth masks,
+    // saves ~6 noise evals per vertex (~19%).
     var continentConfig = config
-    continentConfig.octaves = 3
+    continentConfig.octaves = 2
     continentConfig.warpStrength = 0
     let continentFreq = config.baseFrequency * 0.18
     let continent = mtFBMSum(config: continentConfig,

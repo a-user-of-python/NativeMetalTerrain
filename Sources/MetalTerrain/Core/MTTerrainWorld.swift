@@ -205,6 +205,9 @@ public final class MTTerrainWorld {
 
         // Reuse the cached noise tables (built once per seed).
         let (noise, warpNoise) = noisePair()
+        // Hoist config.noise out of the inner loop: `config` is a locking
+        // computed property, so accessing it per-vertex = 62.5K lock acquisitions.
+        let noiseConfig = config.noise
 
         var heights = [Float](repeating: 0, count: res * res)
         for iz in 0..<res {
@@ -212,7 +215,7 @@ public final class MTTerrainWorld {
             for ix in 0..<res {
                 let wx = x0 + Double(ix) * step
                 heights[iz * res + ix] = mtHeightSample(
-                    x: wx, y: wz, config: config.noise,
+                    x: wx, y: wz, config: noiseConfig,
                     noise: noise, warpNoise: warpNoise)
             }
         }

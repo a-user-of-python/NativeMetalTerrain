@@ -167,6 +167,10 @@ public enum MTMeshBuilder {
         let cell = worldSize / Float(res - 1)   // world units per height sample
         let originX = Float(chunk.coord.x) * worldSize
         let originZ = Float(chunk.coord.z) * worldSize
+        // Hoist biomes once: biomeAt does 2 locks + array concat per call,
+        // and groundColor calls it up to 3x per vertex (190K allocs/chunk).
+        let biomes = world.allBiomes
+        let heightScale = cfg.heightScale
 
         func h(_ i: Int, _ j: Int) -> Float { chunk.heights[j * res + i] }
 
@@ -189,9 +193,9 @@ public enum MTMeshBuilder {
 
                 let wx = originX + Float(i) / Float(res - 1) * worldSize
                 let wz = originZ + Float(j) / Float(res - 1) * worldSize
-                let wy = world.worldY(forHeight: height)
+                let wy = height * heightScale
 
-                let (rgb, material) = groundColor(height: height, normalY: normal.y, world: world)
+                let (rgb, material) = groundColor(height: height, normalY: normal.y, biomes: biomes)
                 vertices.append(MTVertex(
                     position: SIMD3<Float>(wx, wy, wz),
                     normal: normal,
@@ -274,12 +278,24 @@ public enum MTMeshBuilder {
     /// Vertex color for a terrain sample: biome ground color, blended toward
     /// the neighboring biome near height borders, overridden by the biome's
     /// slope color on steep slopes (cliffs).
+    /// Lock-free biome lookup on a hoisted array. Identical logic to
+    /// MTTerrainWorld.biomeAt but without locks or array concatenation.
+    /// Called ~190K times per chunk — must stay allocation-free.
+    private static func biomeAt(height h: Float, in biomes: [MTBiome]) -> MTBiome {
+        for biome in biomes {
+            if h >= biome.minHeight && h <= biome.maxHeight {
+                return biome
+            }
+        }
+        return biomes.last ?? biomes[0]
+    }
+
     private static func groundColor(
         height h: Float,
         normalY: Float,
-        world: MTTerrainWorld
+        biomes: [MTBiome]
     ) -> (SIMD3<Float>, Float) {
-        let biome = world.biomeAt(height: h)
+        let biome = biomeAt(height: h, in: biomes)
         // Material ID for per-material specular: 0=grass, 1=rock, 2=sand,
         // 3=snow, 4=deep snow, 5=water.
         let material: Float
@@ -312,14 +328,14 @@ public enum MTMeshBuilder {
         let e = biomeBlendRange
         if h > biome.maxHeight - e {
             // Near the top border: blend toward the biome above.
-            let above = world.biomeAt(height: min(h + e, 1.0))
+            let above = biomeAt(height: min(h + e, 1.0), in: biomes)
             if above.name != biome.name {
                 let t = smooth01((biome.maxHeight - h) / e)
                 color = mix(above.groundColor, color, t: t)
             }
         } else if h < biome.minHeight + e {
             // Near the bottom border: blend toward the biome below.
-            let below = world.biomeAt(height: max(h - e, 0.0))
+            let below = biomeAt(height: max(h - e, 0.0), in: biomes)
             if below.name != biome.name {
                 let t = smooth01((h - biome.minHeight) / e)
                 color = mix(below.groundColor, color, t: t)

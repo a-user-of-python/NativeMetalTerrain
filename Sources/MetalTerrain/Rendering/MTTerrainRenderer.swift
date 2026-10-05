@@ -244,6 +244,16 @@ public final class MTTerrainRenderer {
         }
         cacheLock.unlock()
 
+        // Build nearest chunks first: the chunk under the camera should
+        // appear immediately, not after a random Set ordering. Zero visual
+        // change, large perceived improvement.
+        let cx = Float(center.x) * size
+        let cz = Float(center.z) * size
+        toBuild.sort {
+            let dx0 = Float($0.x) * size - cx, dz0 = Float($0.z) * size - cz
+            let dx1 = Float($1.x) * size - cx, dz1 = Float($1.z) * size - cz
+            return dx0*dx0 + dz0*dz0 < dx1*dx1 + dz1*dz1
+        }
         for coord in toBuild {
             buildChunkAsync(coord, cameraTarget: cameraTarget)
         }
@@ -1032,13 +1042,9 @@ public final class MTTerrainRenderer {
             let dist = hypot(cx - cameraTarget.x, cz - cameraTarget.y)
             let distanceFactor = dist / (Float(self.world.config.viewDistance) * size)
             // LOD: far chunks generate at half resolution (4x fewer noise evals).
-            // On the M3 mesh-shading path the GPU subsamples via lodStride, so
-            // keep full resolution and let the mesh shader do the LOD work.
-            #if M3_FEATURES
-            let resScale: Float = 1.0
-            #else
+            // The mesh shader takes arbitrary resolution+lodStride, so half-res
+            // heightmaps work identically on both paths.
             let resScale: Float = distanceFactor > 0.4 ? 0.5 : 1.0
-            #endif
             let chunk = self.world.generateChunk(at: coord, resolutionScale: resScale)
             let mesh = MTMeshBuilder.buildLOD(for: chunk, world: self.world,
                                               distanceFactor: distanceFactor)
