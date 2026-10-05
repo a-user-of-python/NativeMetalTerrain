@@ -1,0 +1,96 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.1.1). Leave empty to auto-increment.'
+        required: false
+        default: ''
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  ios-build:
+    name: Build demo app (unsigned IPA)
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Select newest Xcode
+        run: |
+          ls /Applications/ | grep -i xcode
+          NEWEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          echo "Selecting: $NEWEST"
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
+          xcodebuild -version
+
+      - name: Determine version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INPUT_VERSION="${{ inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            LATEST=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+            if [ -z "$LATEST" ]; then
+              VERSION="v0.1.0"
+            else
+              NUM=${LATEST#v}
+              MAJOR=$(echo $NUM | cut -d. -f1)
+              MINOR=$(echo $NUM | cut -d. -f2)
+              PATCH=$(echo $NUM | cut -d. -f3)
+              PATCH=$((PATCH + 1))
+              VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            fi
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          IPA_NAME="NativeMetalTerrain-${VERSION}.ipa"
+          echo "ipa_name=$IPA_NAME" >> $GITHUB_OUTPUT
+          echo "Releasing $VERSION as $IPA_NAME"
+
+      - name: Build (no signing)
+        run: |
+          xcodebuild build \
+            -project NativeMetalTerrain.xcodeproj \
+            -scheme NativeMetalTerrain \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=""
+
+      - name: Package unsigned IPA
+        run: |
+          APP=$(find build/Build/Products/Release-iphoneos -name "NativeMetalTerrain.app" -maxdepth 1 | head -1)
+          test -d "$APP" || { echo "missing app"; find build/Build/Products -name "*.app" | head -5; exit 1; }
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -r -y "${{ steps.version.outputs.ipa_name }}" Payload
+          rm -rf Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.ipa_name }}
+          path: ${{ steps.version.outputs.ipa_name }}
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.version }}" \
+            "${{ steps.version.outputs.ipa_name }}" \
+            --title "${{ steps.version.outputs.version }}" \
+            --notes "MetalTerrain demo build."
