@@ -384,9 +384,14 @@ public final class MTTerrainRenderer {
         writeUniforms(slot: terrainSlot, model: matrix_identity_float4x4, time: time,
                        viewProj: viewProj, cameraPos: cameraPos)
         // Water plane is built around the XZ origin; recenter it under the camera.
+        // Snap to the water grid (size/64) so vertices align to stable world
+        // positions — prevents shoreline swimming/jitter as the camera moves.
+        let waterSize = Float(world.config.viewDistance * 2 + 4) * world.config.chunkWorldSize
+        let waterGrid = waterSize / 64.0
+        let snappedX = (lastCameraTarget.x / waterGrid).rounded() * waterGrid
+        let snappedZ = (lastCameraTarget.y / waterGrid).rounded() * waterGrid
         writeUniforms(slot: waterSlot,
-                      model: mtTranslation(SIMD3<Float>(lastCameraTarget.x, 0,
-                                                        lastCameraTarget.y)),
+                      model: mtTranslation(SIMD3<Float>(snappedX, 0, snappedZ)),
                       time: time, viewProj: viewProj, cameraPos: cameraPos)
 
         encoder.setDepthStencilState(depthState)
