@@ -565,6 +565,9 @@ struct TerrainView: UIViewRepresentable {
             if carSpawned {
                 // Live mirror reflection: render the scene from behind the
                 // car into a small texture (updated every frame).
+                // Skipped in the simulator: software Metal rendering makes
+                // this peg the CPU (the mirrors just show the fallback color).
+                #if !targetEnvironment(simulator)
                 if let device {
                     if mirrorReflectionTex == nil {
                         let desc = MTLTextureDescriptor.texture2DDescriptor(
@@ -584,6 +587,7 @@ struct TerrainView: UIViewRepresentable {
                                                   lookingAt: mirrorTarget)
                     }
                 }
+                #endif
                 let viewProj = carPerspective(fovDegrees: 55, aspect: aspect,
                                               near: 1, far: 4000)
                     * carLookAt(eye: camPosition, target: camTarget)
