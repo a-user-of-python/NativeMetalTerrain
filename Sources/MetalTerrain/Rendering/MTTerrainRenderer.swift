@@ -542,8 +542,8 @@ public final class MTTerrainRenderer {
         Task { [weak self, d] in
             guard let self else { return }
             do {
-                self.meshShadingPipelineState =
-                    try await self.device.makeRenderPipelineState(descriptor: d, options: [])
+                let (pipeline, _) = try await self.device.makeRenderPipelineState(descriptor: d, options: [])
+                self.meshShadingPipelineState = pipeline
             } catch {
                 self.meshShadingPipelineState = nil
             }
