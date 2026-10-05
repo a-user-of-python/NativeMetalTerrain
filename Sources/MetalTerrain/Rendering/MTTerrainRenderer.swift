@@ -538,7 +538,7 @@ public final class MTTerrainRenderer {
         color0.pixelFormat = .bgra8Unorm
         d.depthAttachmentPixelFormat = .depth32Float
         do {
-            meshShadingPipelineState = try device.makeRenderPipelineState(descriptor: d)
+            meshShadingPipelineState = try device.makeRenderPipelineState(descriptor: d, options: [])
         } catch {
             meshShadingPipelineState = nil
         }
