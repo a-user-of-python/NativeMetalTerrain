@@ -219,13 +219,16 @@ public final class MTTerrainRenderer {
         let now = Date().timeIntervalSince1970
         var toBuild: [MTChunkCoord] = []
         cacheLock.lock()
-        // Evict anything outside the view radius.
-        for coord in chunkCache.keys where Self.chebyshev(coord, center) > radius {
+        // Evict anything well outside the view radius (+1 chunk buffer).
+        // Keeps the previous ring alive while new chunks build, preventing
+        // see-through holes during fast movement.
+        for coord in chunkCache.keys where Self.chebyshev(coord, center) > radius + 1 {
             chunkCache.removeValue(forKey: coord)
         }
-        // LRU cap: never hold more than the full visible square, with an
-        // absolute ceiling so a large viewDistance can't exhaust iPad memory.
-        let cap = min((2 * radius + 1) * (2 * radius + 1), Self.maxChunkCacheSize)
+        // LRU cap: never hold more than the visible square plus the 1-chunk
+        // eviction buffer, with an absolute ceiling so a large viewDistance
+        // can't exhaust iPad memory.
+        let cap = min((2 * (radius + 1) + 1) * (2 * (radius + 1) + 1), Self.maxChunkCacheSize)
         if chunkCache.count > cap {
             let oldest = chunkCache
                 .sorted { $0.value.lastUsed < $1.value.lastUsed }
