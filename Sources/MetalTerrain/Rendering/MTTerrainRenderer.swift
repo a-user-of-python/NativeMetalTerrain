@@ -968,7 +968,8 @@ public final class MTTerrainRenderer {
     // MARK: Uniforms
 
     private func buildUniformBuffer() {
-        let length = uniformStrideAligned * maxFramesInFlight * slotsPerFrame
+        // +1 for the reflection slot (used by renderReflection for mirrors).
+        let length = uniformStrideAligned * (maxFramesInFlight * slotsPerFrame + 1)
         guard let buf = device.makeBuffer(length: length, options: .storageModeShared) else {
             preconditionFailure("MTTerrainRenderer: uniform buffer allocation failed")
         }
