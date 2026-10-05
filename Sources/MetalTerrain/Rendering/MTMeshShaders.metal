@@ -157,6 +157,7 @@ float meshDetailNoise(float2 p) {
 /// displaces vertices along the normal, giving grass, rock, sand, and snow
 /// actual 3D texture instead of flat shading.
 /// Material ids: 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water.
+/// Water gets NO displacement (must stay flat to avoid shore glitches).
 float2 meshDetailParams(float material) {
     if (material < 0.5f) {          // grass: gentle tufty bumps
         return float2(0.9f, 0.55f);
@@ -166,8 +167,6 @@ float2 meshDetailParams(float material) {
         return float2(0.35f, 1.4f);
     } else if (material < 4.5f) {   // snow: soft drifts
         return float2(0.5f, 0.22f);
-    } else if (material < 5.5f) {   // water: gentle waves (animated below)
-        return float2(0.25f, 0.45f);
     }
     return float2(0.0f, 1.0f);
 }

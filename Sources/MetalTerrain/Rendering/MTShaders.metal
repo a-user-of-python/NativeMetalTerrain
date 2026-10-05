@@ -64,7 +64,9 @@ float2 meshDetailParamsStd(float material) {
     else if (material < 1.5f) return float2(1.6f, 0.35f);  // rock: craggy
     else if (material < 2.5f) return float2(0.35f, 1.4f); // sand: ripples
     else if (material < 4.5f) return float2(0.5f, 0.22f); // snow: drifts
-    else if (material < 5.5f) return float2(0.25f, 0.45f);// water: waves
+    // Water (5): NO geometric displacement — the water plane must stay
+    // perfectly flat to avoid shore glitching and z-fighting. Water
+    // animation is handled in the fragment shader instead.
     return float2(0.0f, 1.0f);
 }
 

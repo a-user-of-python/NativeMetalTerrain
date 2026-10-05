@@ -134,6 +134,7 @@ struct TerrainView: UIViewRepresentable {
         var followCamPos = SIMD3<Float>(0, 0, 0)
         var followCamInit = false
         private var carRenderer: CarRenderer?
+        private var mirrorReflectionTex: MTLTexture?  // live scene for car mirrors
 
         private var parent = TerrainView(
             seed: .constant(1337), rebuildToken: .constant(0),
@@ -383,37 +384,41 @@ struct TerrainView: UIViewRepresentable {
         }
 
         /// Arcade car physics: joystick Y = throttle/brake, X = steering.
+        /// Tuned for feel: smooth acceleration, responsive but stable steering.
         private func updateCar(dt: Float) {
             guard let world else { return }
             let input = parent.moveInput
             let dt = min(max(dt, 0), 0.1)
 
             // Steering smoothing (no twitch).
-            carSteer += (input.x - carSteer) * min(1, dt * 8)
+            carSteer += (input.x - carSteer) * min(1, dt * 10)
 
-            // Throttle / brake / reverse.
-            let accel: Float = 55
+            // Throttle / brake / reverse. Softer acceleration for control.
+            let accel: Float = 32
             if input.y > 0.05 {
-                carSpeed += input.y * accel * dt
+                // Smooth acceleration curve: stronger at low speed.
+                let speedFactor = 1.0 - min(abs(carSpeed) / 60.0, 0.7)
+                carSpeed += input.y * accel * speedFactor * dt
             } else if input.y < -0.05 {
                 if carSpeed > 1 {
-                    carSpeed += input.y * accel * 1.8 * dt  // braking
+                    carSpeed += input.y * accel * 2.0 * dt  // braking
                 } else {
-                    carSpeed += input.y * accel * 0.6 * dt  // reverse
+                    carSpeed += input.y * accel * 0.5 * dt  // reverse (slower)
                 }
             }
             // Drag + rolling resistance.
-            carSpeed -= carSpeed * 1.1 * dt
-            carSpeed -= (carSpeed >= 0 ? 1 : -1) * 5 * dt
-            if abs(carSpeed) < 0.4 && abs(input.y) < 0.05 { carSpeed = 0 }
-            carSpeed = min(75, max(-25, carSpeed))
+            carSpeed -= carSpeed * 0.9 * dt
+            carSpeed -= (carSpeed >= 0 ? 1 : -1) * 4 * dt
+            if abs(carSpeed) < 0.3 && abs(input.y) < 0.05 { carSpeed = 0 }
+            carSpeed = min(50, max(-18, carSpeed))
 
-            // Steering: tighter at speed, none when stationary.
+            // Steering: responsive at low speed, stable at high speed.
             if abs(carSpeed) > 0.5 {
-                // Bicycle-ish yaw rate.
                 let wheelBase: Float = 5.4
+                // Reduce steering at high speed to prevent spinouts.
+                let speedDamp = 1.0 / (1.0 + abs(carSpeed) * 0.02)
                 carHeading += carSteer * CarRenderer.maxSteerAngle
-                    * (carSpeed / wheelBase) * dt
+                    * (carSpeed / wheelBase) * speedDamp * dt
             }
 
             // Integrate; block water like walk mode (with axis slide).
@@ -557,13 +562,37 @@ struct TerrainView: UIViewRepresentable {
                 let viewProj = carPerspective(fovDegrees: 55, aspect: aspect,
                                               near: 1, far: 4000)
                     * carLookAt(eye: camPosition, target: camTarget)
+                // Live mirror reflection: render the scene from behind the
+                // car into a small texture (updated every frame).
+                if let renderer, let device {
+                    if mirrorReflectionTex == nil {
+                        let desc = MTLTextureDescriptor.texture2DDescriptor(
+                            pixelFormat: .bgra8Unorm, width: 256, height: 128,
+                            mipmapped: false)
+                        desc.usage = [.renderTarget, .shaderRead]
+                        desc.storageMode = .private
+                        mirrorReflectionTex = device.makeTexture(descriptor: desc)
+                    }
+                    if let reflTex = mirrorReflectionTex {
+                        let carM = carModelMatrix()
+                        let carPos3 = SIMD3<Float>(carM.columns.3.x, carM.columns.3.y, carM.columns.3.z)
+                        let fwd3 = SIMD3<Float>(sin(carHeading), 0, cos(carHeading))
+                        // Mirror camera: at the car, looking backward.
+                        let mirrorEye = carPos3 + SIMD3<Float>(0, 4, 0)
+                        let mirrorTarget = carPos3 - fwd3 * 50 + SIMD3<Float>(0, 2, 0)
+                        renderer.renderReflection(to: reflTex, from: mirrorEye,
+                                                  lookingAt: mirrorTarget)
+                    }
+                }
                 carRenderer?.draw(in: view,
                                   viewProj: viewProj,
+                                  cameraPos: camPosition,
                                   sunAzimuth: renderer.sunAzimuth,
                                   sunElevation: renderer.sunElevation,
                                   carModel: carModelMatrix(),
                                   wheelSpin: carWheelSpin,
-                                  steer: carSteer)
+                                  steer: carSteer,
+                                  reflectionTex: mirrorReflectionTex)
             }
         }
 
