@@ -255,24 +255,24 @@ struct TerrainView: UIViewRepresentable {
             let world: MTTerrainWorld
             switch preset {
             case .default:
-                world = MTTerrainWorld(seed: seed, config: .default)
+                world = MTTerrainWorld(seed: seed, config: .auto)
             case .desert:
-                var config = MTTerrainConfig.default
+                var config = MTTerrainConfig.auto
                 config.biomes = Self.desertBiomes
                 world = MTTerrainWorld(seed: seed, config: config)
             case .alien:
-                var config = MTTerrainConfig.default
+                var config = MTTerrainConfig.auto
                 config.biomes = Self.alienBiomes
                 world = MTTerrainWorld(seed: seed, config: config)
             case .forest:
-                var config = MTTerrainConfig.default
+                var config = MTTerrainConfig.auto
                 config.biomes = Self.forestBiomes
                 // Dense woodland: boost structure density for a lived-in feel.
                 config.structureDensity = 0.65
                 config.structuresEnabled = true
                 world = MTTerrainWorld(seed: seed, config: config)
             case .custom:
-                world = MTTerrainWorld(seed: seed, config: .default)
+                world = MTTerrainWorld(seed: seed, config: .auto)
                 // Custom biome: takes precedence over the built-ins in 0.80–1.0,
                 // replacing the default mountain/snowyPeak bands up there.
                 world.setBiome(MTBiome(

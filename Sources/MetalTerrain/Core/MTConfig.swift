@@ -58,4 +58,36 @@ public struct MTTerrainConfig {
     public static var `default`: MTTerrainConfig {
         MTTerrainConfig()
     }
+
+    /// Environment-aware defaults: `.simulator` in the Xcode Simulator,
+    /// `.default` on device. Use this when you want the app to automatically
+    /// pick the right settings.
+    public static var auto: MTTerrainConfig {
+        isSimulator ? .simulator : .default
+    }
+
+    /// Reduced settings for Xcode Simulator. The simulator does software
+    /// Metal rendering (especially slow on Intel Macs), so this uses
+    /// much lower geometry density and fewer chunks. Automatically selected
+    /// by MTTerrainView when running in the simulator.
+    public static var simulator: MTTerrainConfig {
+        MTTerrainConfig(
+            chunkResolution: 64,      // 16x fewer verts than 250
+            chunkWorldSize: 1000,
+            viewDistance: 3,          // fewer chunks to build/draw
+            seaLevel: 0.45,
+            heightScale: 400,
+            structuresEnabled: true,
+            structureDensity: 0.2     // fewer structures
+        )
+    }
+
+    /// True when running in the Xcode Simulator (not on device).
+    public static var isSimulator: Bool {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }
 }
