@@ -402,8 +402,8 @@ public final class MTTerrainRenderer {
         #if M3_FEATURES
         // Use the ray-traced shadow pipeline when the TLAS is ready.
         let tlas = rayTracing?.topLevelStructure
-        let pipeline = (tlas != nil) ? (terrainPipelineRT ?? terrainPipeline)
-                                     : terrainPipeline
+        let pipeline: MTLRenderPipelineState = (tlas != nil) ? (terrainPipelineRT ?? terrainPipeline)
+                                                             : terrainPipeline
         #else
         let pipeline = terrainPipeline
         #endif
