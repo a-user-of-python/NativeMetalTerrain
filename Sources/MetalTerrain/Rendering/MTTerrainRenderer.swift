@@ -520,8 +520,10 @@ public final class MTTerrainRenderer {
         var ids: SIMD4<Float>
     }
 
-    /// Compiles the object/mesh/fragment pipeline. Best-effort: any failure
-    /// leaves `meshShadingPipelineState` nil and the standard path is used.
+    /// Compiles the object/mesh/fragment pipeline. Best-effort and async:
+    /// mesh-descriptor pipeline creation is async, so this returns
+    /// immediately and the pipeline appears when compilation finishes —
+    /// until then the standard path is used.
     private func buildMeshShadingPipelines(library: MTLLibrary) {
         guard MTCapabilities.supportsMeshShading(device: device),
               let objectFn = library.makeFunction(name: "mesh_terrain_object"),
@@ -537,10 +539,14 @@ public final class MTTerrainRenderer {
         }
         color0.pixelFormat = .bgra8Unorm
         d.depthAttachmentPixelFormat = .depth32Float
-        do {
-            meshShadingPipelineState = try device.makeRenderPipelineState(descriptor: d, options: [])
-        } catch {
-            meshShadingPipelineState = nil
+        Task { [weak self, d] in
+            guard let self else { return }
+            do {
+                self.meshShadingPipelineState =
+                    try await self.device.makeRenderPipelineState(descriptor: d, options: [])
+            } catch {
+                self.meshShadingPipelineState = nil
+            }
         }
     }
 
