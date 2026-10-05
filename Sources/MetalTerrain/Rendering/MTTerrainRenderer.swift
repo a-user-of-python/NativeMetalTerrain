@@ -1036,6 +1036,13 @@ public final class MTTerrainRenderer {
         cacheLock.unlock()
         buildQueue.async { [weak self] in
             guard let self = self else { return }
+            // Early-out: if a newer generation was requested while this
+            // block was queued (rapid Generate clicks), skip the expensive
+            // work entirely instead of building then dropping it.
+            self.cacheLock.lock()
+            let current = self.buildGeneration
+            self.cacheLock.unlock()
+            guard current == generation else { return }
             let size = self.world.config.chunkWorldSize
             let cx = (Float(coord.x) + 0.5) * size
             let cz = (Float(coord.z) + 0.5) * size

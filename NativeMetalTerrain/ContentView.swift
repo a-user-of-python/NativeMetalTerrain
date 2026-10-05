@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var seedText = "1337"
     @State private var seed: UInt64 = 1337
     @State private var rebuildToken = 0
+    @State private var lastRegenerateTime: Double = 0
     @State private var preset: BiomePreset = .default
     @State private var structuresEnabled = true
     @State private var wireframe = false
@@ -164,8 +165,12 @@ struct ContentView: View {
     }
 
     /// Applies the seed field (or a random seed when it is blank/invalid)
-    /// and forces a full world rebuild.
+    /// and forces a full world rebuild. Debounced: ignores rapid clicks
+    /// (prevents crash from queuing 500+ chunk builds).
     private func regenerate() {
+        let now = Date().timeIntervalSince1970
+        guard now - lastRegenerateTime > 1.5 else { return }
+        lastRegenerateTime = now
         let trimmed = seedText.trimmingCharacters(in: .whitespacesAndNewlines)
         if let value = UInt64(trimmed), !trimmed.isEmpty {
             seed = value
