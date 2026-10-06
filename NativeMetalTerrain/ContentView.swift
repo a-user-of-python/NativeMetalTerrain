@@ -260,6 +260,8 @@ struct ContentView: View {
             showOutput(msg, isError: true)
         }
         commandText = ""
+        // v1.0.1: collapse back to the command button after running
+        commandExpanded = false
     }
 
     /// Show output message briefly. Tap to dismiss, or it clears on next command.
