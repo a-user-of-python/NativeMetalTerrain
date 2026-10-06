@@ -159,34 +159,34 @@ struct ControlShelf: View {
 
             Section(header: hdr("Terrain")) {
                 SettingSlider(label: "View Distance", value: intD($viewDistance), range: 1...10, step: 1, format: "%.0f")
-                SettingSlider(label: "Chunk Size", value: fltD($config.chunkWorldSize), range: 50...2000, step: 10, format: "%.0f")
+                SettingSlider(label: "Chunk Size", value: fltD($config.chunkWorldSize), range: 50...1000, step: 10, format: "%.0f")
                 SettingSlider(label: "Chunk Resolution", value: intD($config.chunkResolution), range: 32...250, step: 1, format: "%.0f")
                 SettingSlider(label: "Sea Level", value: fltD($config.seaLevel), range: 0...1, step: 0.01)
-                SettingSlider(label: "Height Scale", value: fltD($config.heightScale), range: 10...1000, step: 5, format: "%.0f")
+                SettingSlider(label: "Height Scale", value: fltD($config.heightScale), range: 10...600, step: 5, format: "%.0f")
                 SettingSlider(label: "Continent Scale", value: fltD($config.continentScale), range: 0.2...3, step: 0.05)
                 SettingSlider(label: "River Scale", value: fltD($config.riverScale), range: 0.2...3, step: 0.05)
                 SettingSlider(label: "Mountain Sharpness", value: fltD($config.mountainSharpness), range: 0.3...1.5, step: 0.01)
             }
 
             Section(header: hdr("Terrain Noise")) {
-                SettingSlider(label: "Octaves", value: intD($config.noise.octaves), range: 1...12, step: 1, format: "%.0f")
-                SettingSlider(label: "Frequency", value: $config.noise.baseFrequency, range: 0.001...0.05, step: 0.001, format: "%.4f")
+                SettingSlider(label: "Octaves", value: intD($config.noise.octaves), range: 1...8, step: 1, format: "%.0f")
+                SettingSlider(label: "Frequency", value: $config.noise.baseFrequency, range: 0.001...0.02, step: 0.001, format: "%.4f")
                 SettingSlider(label: "Amplitude", value: $config.noise.amplitude, range: 0.1...3, step: 0.05)
-                SettingSlider(label: "Lacunarity", value: $config.noise.lacunarity, range: 1...4, step: 0.01)
+                SettingSlider(label: "Lacunarity", value: $config.noise.lacunarity, range: 1...2.5, step: 0.01)
                 SettingSlider(label: "Gain", value: $config.noise.gain, range: 0.1...1, step: 0.01)
                 SettingSlider(label: "Warp Strength", value: $config.noise.warpStrength, range: 0...1, step: 0.01)
-                SettingSlider(label: "Warp Frequency", value: $config.noise.warpFrequency, range: 0.001...0.1, step: 0.001, format: "%.4f")
+                SettingSlider(label: "Warp Frequency", value: $config.noise.warpFrequency, range: 0.001...0.05, step: 0.001, format: "%.4f")
                 SettingToggle(label: "Ridged", value: $config.noise.ridged)
             }
 
             Section(header: hdr("Structure Noise")) {
-                SettingSlider(label: "Octaves", value: intD($config.structureNoise.octaves), range: 1...12, step: 1, format: "%.0f")
-                SettingSlider(label: "Frequency", value: $config.structureNoise.baseFrequency, range: 0.001...0.05, step: 0.001, format: "%.4f")
+                SettingSlider(label: "Octaves", value: intD($config.structureNoise.octaves), range: 1...8, step: 1, format: "%.0f")
+                SettingSlider(label: "Frequency", value: $config.structureNoise.baseFrequency, range: 0.001...0.02, step: 0.001, format: "%.4f")
                 SettingSlider(label: "Amplitude", value: $config.structureNoise.amplitude, range: 0.1...3, step: 0.05)
-                SettingSlider(label: "Lacunarity", value: $config.structureNoise.lacunarity, range: 1...4, step: 0.01)
+                SettingSlider(label: "Lacunarity", value: $config.structureNoise.lacunarity, range: 1...2.5, step: 0.01)
                 SettingSlider(label: "Gain", value: $config.structureNoise.gain, range: 0.1...1, step: 0.01)
                 SettingSlider(label: "Warp Strength", value: $config.structureNoise.warpStrength, range: 0...1, step: 0.01)
-                SettingSlider(label: "Warp Frequency", value: $config.structureNoise.warpFrequency, range: 0.001...0.1, step: 0.001, format: "%.4f")
+                SettingSlider(label: "Warp Frequency", value: $config.structureNoise.warpFrequency, range: 0.001...0.05, step: 0.001, format: "%.4f")
                 SettingToggle(label: "Ridged", value: $config.structureNoise.ridged)
                 SettingSlider(label: "Density", value: fltD($config.structureDensity), range: 0...1, step: 0.01)
                 SettingToggle(label: "Structures Enabled", value: $config.structuresEnabled)

@@ -48,10 +48,11 @@ public struct MTTerrainConfig {
         riverScale: Float = 1.0,
         mountainSharpness: Float = 0.72
     ) {
-        self.chunkResolution = max(2, chunkResolution)
-        // Clamp to safe ranges: negative/huge viewDistance crashes or
-        // exhausts memory; zero chunkWorldSize divides by zero.
-        self.chunkWorldSize = max(1, chunkWorldSize)
+        // Clamp to safe ranges to prevent crashes from extreme slider values.
+        // chunkResolution * chunkWorldSize * viewDistance determines memory;
+        // 250 res × 3000 size × 10 distance = 18M+ vertices = OOM crash.
+        self.chunkResolution = min(max(2, chunkResolution), 250)
+        self.chunkWorldSize = min(max(1, chunkWorldSize), 2000)
         self.viewDistance = min(max(1, viewDistance), 10)
         self.seaLevel = min(max(0, seaLevel), 1)
         self.heightScale = max(1, heightScale)
@@ -65,8 +66,8 @@ public struct MTTerrainConfig {
         self.fogDensity = max(0, fogDensity)
         self.ambientIntensity = min(max(0, ambientIntensity), 1)
         self.sunIntensity = min(max(0, sunIntensity), 2)
-        self.continentScale = max(0.1, continentScale)
-        self.riverScale = max(0.1, riverScale)
+        self.continentScale = min(max(0.1, continentScale), 5.0)
+        self.riverScale = min(max(0.1, riverScale), 5.0)
         self.mountainSharpness = min(max(0.1, mountainSharpness), 2.0)
     }
 

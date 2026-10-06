@@ -27,11 +27,15 @@ private func fastPow072(_ x: Float) -> Float {
 /// Configurable mountain sharpness. Uses LUT for default 0.72, pow() otherwise.
 @inline(__always)
 private func mountainPow(_ x: Float, sharpness: Float) -> Float {
+    // Guard against NaN input (can occur with extreme noise parameters).
+    guard x.isFinite else { return 0 }
     if sharpness == 0.72 {
         return fastPow072(x)
     }
     let clamped = min(max(x, 0), 1)
-    return Float(pow(Double(clamped), Double(sharpness)))
+    let result = Float(pow(Double(clamped), Double(sharpness)))
+    // pow() can return NaN for edge cases; fall back to 0.
+    return result.isFinite ? result : 0
 }
 
 // MARK: - Noise configuration
@@ -53,14 +57,16 @@ public struct MTNoiseConfig {
                 lacunarity: Double = 2.03, gain: Double = 0.42,
                 warpStrength: Double = 0.25, warpFrequency: Double = 0.015,
                 ridged: Bool = false) {
+        // Clamp to safe ranges: extreme lacunarity/frequency combinations
+        // produce astronomical sampling coordinates that hang or crash.
         self.seed = seed
-        self.octaves = octaves
-        self.baseFrequency = baseFrequency
-        self.amplitude = amplitude
-        self.lacunarity = lacunarity
-        self.gain = gain
-        self.warpStrength = warpStrength
-        self.warpFrequency = warpFrequency
+        self.octaves = max(1, min(12, octaves))
+        self.baseFrequency = max(0.0001, min(0.1, baseFrequency))
+        self.amplitude = max(0.01, min(10.0, amplitude))
+        self.lacunarity = max(1.0, min(3.0, lacunarity))
+        self.gain = max(0.01, min(1.0, gain))
+        self.warpStrength = max(0, min(2.0, warpStrength))
+        self.warpFrequency = max(0.0001, min(0.2, warpFrequency))
         self.ridged = ridged
     }
 }
