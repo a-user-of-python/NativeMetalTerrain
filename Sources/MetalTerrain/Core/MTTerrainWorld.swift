@@ -308,7 +308,7 @@ public final class MTTerrainWorld {
             // All weights zero -> no kind can spawn; skip this candidate.
             guard totalWeight > 0 else { continue }
             // Weighted pick via cumulative weights (t in 0...1).
-            let pick = t * totalWeight
+            let pick = t * Double(totalWeight)
             var cumulative: Float = 0
             var kindIndex = kinds.count - 1  // fallback covers t == 1.0
             for i in 0..<kinds.count {
