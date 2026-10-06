@@ -210,7 +210,11 @@ public final class MTTerrainWorld {
         // Hoist config.noise out of the inner loop: `config` is a locking
         // computed property, so accessing it per-vertex = 62.5K lock acquisitions.
         // M1: build the height field config once (avoids 4 struct copies/vertex).
-        let field = MTHeightFieldConfig(base: config.noise)
+        // v1.0.5: pass through configurable terrain scales.
+        let field = MTHeightFieldConfig(base: config.noise,
+                                        continentScale: config.continentScale,
+                                        riverScale: config.riverScale,
+                                        mountainSharpness: config.mountainSharpness)
 
         var heights = [Float](repeating: 0, count: res * res)
         // M3: track min/max in the fill loop (avoids two extra passes).
@@ -271,7 +275,10 @@ public final class MTTerrainWorld {
 
         // Hoist noise pair for lock-free height sampling (avoid heightAt locks).
         let (hNoise, hWarpNoise) = noisePair()
-        let hField = MTHeightFieldConfig(base: cfg.noise)
+        let hField = MTHeightFieldConfig(base: cfg.noise,
+                                           continentScale: cfg.continentScale,
+                                           riverScale: cfg.riverScale,
+                                           mountainSharpness: cfg.mountainSharpness)
 
         var out: [MTStructurePlacement] = []
         let candidateCount = 12

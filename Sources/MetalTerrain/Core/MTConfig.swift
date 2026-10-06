@@ -18,6 +18,12 @@ public struct MTTerrainConfig {
     public var waterColor: SIMD3<Float>   // linear RGB
     public var fogColor: SIMD3<Float>      // linear RGB
     public var fogDensity: Float
+    // v1.0.5: new customizable settings
+    public var ambientIntensity: Float    // 0...1, default 0.38
+    public var sunIntensity: Float        // 0...2, default 1.0
+    public var continentScale: Float      // multiplier, default 1.0
+    public var riverScale: Float           // multiplier, default 1.0
+    public var mountainSharpness: Float   // power exponent, default 0.72
 
     public init(
         chunkResolution: Int = 250,
@@ -35,7 +41,12 @@ public struct MTTerrainConfig {
         structureDensity: Float = 0.35,
         waterColor: SIMD3<Float> = SIMD3<Float>(0.10, 0.35, 0.62),
         fogColor: SIMD3<Float> = SIMD3<Float>(0.62, 0.74, 0.86),
-        fogDensity: Float = 0.0028
+        fogDensity: Float = 0.0028,
+        ambientIntensity: Float = 0.38,
+        sunIntensity: Float = 1.0,
+        continentScale: Float = 1.0,
+        riverScale: Float = 1.0,
+        mountainSharpness: Float = 0.72
     ) {
         self.chunkResolution = max(2, chunkResolution)
         // Clamp to safe ranges: negative/huge viewDistance crashes or
@@ -52,6 +63,11 @@ public struct MTTerrainConfig {
         self.waterColor = waterColor
         self.fogColor = fogColor
         self.fogDensity = max(0, fogDensity)
+        self.ambientIntensity = min(max(0, ambientIntensity), 1)
+        self.sunIntensity = min(max(0, sunIntensity), 2)
+        self.continentScale = max(0.1, continentScale)
+        self.riverScale = max(0.1, riverScale)
+        self.mountainSharpness = min(max(0.1, mountainSharpness), 2.0)
     }
 
     /// Sensible defaults for every field.

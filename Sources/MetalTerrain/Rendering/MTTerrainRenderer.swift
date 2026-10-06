@@ -1066,10 +1066,10 @@ public final class MTTerrainRenderer {
             model: model,
             cameraPos: SIMD4<Float>(cameraPos ?? self.cameraPos, 1),
             fogColor: SIMD4<Float>(cfg.fogColor, density),
-            lightDir: SIMD4<Float>(normalize(sunDir), 0.38),
+            lightDir: SIMD4<Float>(normalize(sunDir), cfg.ambientIntensity),
             misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0,
                                wireframe ? 1 : 0, detailAmount),
-            seaLevel: SIMD4<Float>(world.worldY(forHeight: cfg.seaLevel), 0, 0, 0)
+            seaLevel: SIMD4<Float>(world.worldY(forHeight: cfg.seaLevel), cfg.sunIntensity, 0, 0)
         )
         var copy = u
         let dst = uniformBuffer.contents().advanced(by: slot * uniformStrideAligned)

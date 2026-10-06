@@ -177,7 +177,10 @@ public enum MTMeshBuilder {
         // world.heightAt() takes 2 locks per call; we do ~1000 border
         // samples per chunk. Using mtHeightSampleField directly avoids all locks.
         let (meshNoise, meshWarpNoise) = world.noisePair()
-        let meshField = MTHeightFieldConfig(base: cfg.noise)
+        let meshField = MTHeightFieldConfig(base: cfg.noise,
+                                            continentScale: cfg.continentScale,
+                                            riverScale: cfg.riverScale,
+                                            mountainSharpness: cfg.mountainSharpness)
 
         func h(_ i: Int, _ j: Int) -> Float { chunk.heights[j * res + i] }
 

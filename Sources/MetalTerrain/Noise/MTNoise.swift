@@ -24,6 +24,16 @@ private func fastPow072(_ x: Float) -> Float {
     return pow072LUT[idx]
 }
 
+/// Configurable mountain sharpness. Uses LUT for default 0.72, pow() otherwise.
+@inline(__always)
+private func mountainPow(_ x: Float, sharpness: Float) -> Float {
+    if sharpness == 0.72 {
+        return fastPow072(x)
+    }
+    let clamped = min(max(x, 0), 1)
+    return Float(pow(Double(clamped), Double(sharpness)))
+}
+
 // MARK: - Noise configuration
 
 /// All tunables for the terrain noise field. Matches DESIGN.md exactly.
@@ -182,9 +192,16 @@ struct MTHeightFieldConfig {
     let warpOctaves: Int
     let rangeOctaves: Int
     let riverOctaves: Int
+    // v1.0.5: configurable terrain feature scales
+    let continentScale: Float
+    let riverScale: Float
+    let mountainSharpness: Float
 
-    init(base: MTNoiseConfig) {
+    init(base: MTNoiseConfig, continentScale: Float = 1.0, riverScale: Float = 1.0, mountainSharpness: Float = 0.72) {
         self.base = base
+        self.continentScale = continentScale
+        self.riverScale = riverScale
+        self.mountainSharpness = mountainSharpness
         var continent = base
         continent.octaves = 2
         continent.warpStrength = 0
@@ -202,9 +219,9 @@ struct MTHeightFieldConfig {
         river.octaves = 3
         river.warpStrength = 0
         self.river = river
-        self.continentFreq = base.baseFrequency * 0.18
+        self.continentFreq = base.baseFrequency * 0.18 * Double(continentScale)
         self.mtnFreq = base.baseFrequency * 0.35
-        self.riverFreq = base.baseFrequency * 0.22
+        self.riverFreq = base.baseFrequency * 0.22 * Double(riverScale)
         self.doWarp = base.warpStrength > 0
         self.warpScale = base.baseFrequency != 0
             ? base.warpFrequency / base.baseFrequency : 1.0
@@ -274,8 +291,9 @@ func mtHeightSampleField(x: Double, y: Double, field: MTHeightFieldConfig,
                                     nx: x * field.mtnFreq, ny: y * field.mtnFreq,
                                     noise: noise)
     // Round the peaks: pow <1 softens the sharp ridged cusps.
-    // M4: use LUT instead of pow() (~75 cycles -> 1 array access).
-    let rounded = fastPow072(Float(max(0, ridged)))
+    // M4: use LUT instead of pow() (~75 cycles -> 1 array access) for default.
+    // v1.0.5: configurable sharpness via mountainPow().
+    let rounded = mountainPow(Float(max(0, ridged)), sharpness: field.mountainSharpness)
     let mountains = Double(rounded) * mountainMask * mountainMask
 
     // ── Rivers: wide carved valleys along low-frequency meanders ──

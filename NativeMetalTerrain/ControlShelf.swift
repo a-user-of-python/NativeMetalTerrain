@@ -35,6 +35,12 @@ struct SavedWorld: Codable, Identifiable {
     var structuresEnabled: Bool
     // Renderer
     var fogDensity: Float
+    // v1.0.5: new settings
+    var ambientIntensity: Float
+    var sunIntensity: Float
+    var continentScale: Float
+    var riverScale: Float
+    var mountainSharpness: Float
 
     var preset: BiomePreset {
         BiomePreset(rawValue: presetRaw) ?? .default
@@ -157,6 +163,9 @@ struct ControlShelf: View {
                 SettingSlider(label: "Chunk Resolution", value: intD($config.chunkResolution), range: 32...250, step: 1, format: "%.0f")
                 SettingSlider(label: "Sea Level", value: fltD($config.seaLevel), range: 0...1, step: 0.01)
                 SettingSlider(label: "Height Scale", value: fltD($config.heightScale), range: 10...1000, step: 5, format: "%.0f")
+                SettingSlider(label: "Continent Scale", value: fltD($config.continentScale), range: 0.2...3, step: 0.05)
+                SettingSlider(label: "River Scale", value: fltD($config.riverScale), range: 0.2...3, step: 0.05)
+                SettingSlider(label: "Mountain Sharpness", value: fltD($config.mountainSharpness), range: 0.3...1.5, step: 0.01)
             }
 
             Section(header: hdr("Terrain Noise")) {
@@ -183,8 +192,13 @@ struct ControlShelf: View {
                 SettingToggle(label: "Structures Enabled", value: $config.structuresEnabled)
             }
 
-            Section(header: hdr("Renderer")) {
+            Section(header: hdr("Lighting")) {
+                SettingSlider(label: "Ambient Light", value: fltD($config.ambientIntensity), range: 0...1, step: 0.01)
+                SettingSlider(label: "Sun Intensity", value: fltD($config.sunIntensity), range: 0...2, step: 0.05)
                 SettingSlider(label: "Fog Density", value: fltD($config.fogDensity), range: 0...0.1, step: 0.001, format: "%.4f")
+            }
+
+            Section(header: hdr("Renderer")) {
                 SettingToggle(label: "Wireframe", value: $wireframe)
                 SettingToggle(label: "Water", value: $showsWater)
                 SettingToggle(label: "Fog", value: $fogEnabled)

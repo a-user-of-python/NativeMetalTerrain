@@ -115,6 +115,7 @@ float3 applyLighting(float3 albedo,
     float ndl = dot(n, lightDir);
     float wrapNdl = clamp((ndl + 0.4) / 1.4, 0.0, 1.0);
     float amb = uniforms.lightDir.w;
+    float sunIntensity = uniforms.seaLevel.y;  // v1.0.5: configurable sun intensity
 
     // Per-material specular: (intensity, shininess)
     // 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water
@@ -144,7 +145,7 @@ float3 applyLighting(float3 albedo,
     // Fresnel rim: subtle edge definition (kept low to avoid plastic look).
     float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.12;
 
-    float3 lit = albedo * (amb + wrapNdl * (1.0 - amb));
+    float3 lit = albedo * (amb + wrapNdl * sunIntensity * (1.0 - amb));
     // Shader effects (specular + fresnel) are toggleable.
     if (uniforms.misc.y > 0.5) {
         lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint

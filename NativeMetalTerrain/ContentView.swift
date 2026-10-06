@@ -464,7 +464,12 @@ struct ContentView: View {
             structRidged: cfg.structureNoise.ridged,
             structureDensity: cfg.structureDensity,
             structuresEnabled: cfg.structuresEnabled,
-            fogDensity: cfg.fogDensity
+            fogDensity: cfg.fogDensity,
+            ambientIntensity: cfg.ambientIntensity,
+            sunIntensity: cfg.sunIntensity,
+            continentScale: cfg.continentScale,
+            riverScale: cfg.riverScale,
+            mountainSharpness: cfg.mountainSharpness
         )
         savedWorlds.save(world)
     }
