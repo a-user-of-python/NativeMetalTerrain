@@ -597,6 +597,16 @@ public final class MTTerrainRenderer {
     /// supports it, and compilation succeeded). Otherwise Metal 3.
     public private(set) var usesMetal4: Bool = false
 
+    /// Force a specific Metal API version, or nil for auto-detect.
+    /// Set before pipelines are built (takes effect on next rebuild).
+    public var metalVersionOverride: MetalAPIVersion? = nil
+
+    /// Metal API version selection.
+    public enum MetalAPIVersion {
+        case metal3
+        case metal4
+    }
+
     #if M3_FEATURES
     /// Mesh-shading pipeline (object + mesh + fragment). Nil when the GPU
     /// lacks mesh shading or compilation failed — falls back to standard.
@@ -853,6 +863,26 @@ public final class MTTerrainRenderer {
         // Mesh-shading pipeline (best-effort; nil on failure or older GPU).
         buildMeshShadingPipelines(library: library)
         #endif
+        // Metal version override (from settings). Nil = auto-detect.
+        if let override = metalVersionOverride {
+            switch override {
+            case .metal4:
+                #if arch(arm64)
+                if #available(iOS 26, macOS 26, *), buildMetal4Pipelines(library: library) {
+                    usesMetal4 = true
+                    return
+                }
+                #endif
+                // Forced Metal 4 but unavailable — fall through to Metal 3.
+                usesMetal4 = false
+                buildMetal3Pipelines(library: library)
+                return
+            case .metal3:
+                usesMetal4 = false
+                buildMetal3Pipelines(library: library)
+                return
+            }
+        }
         // Metal 4 needs Apple Silicon (the MTL4* types don't exist in the
         // Intel SDK). On arm64 with iOS 26 / macOS 26+, try Metal 4 first.
         #if arch(arm64)

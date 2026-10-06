@@ -4,6 +4,10 @@ import MetalTerrain
 /// Root view: full-screen terrain with an overlay control panel.
 /// Portrait -> panel docks at the bottom. Landscape -> panel docks on the right.
 struct ContentView: View {
+    /// Preset selected from the main menu (nil = default).
+    var initialPreset: BiomePreset? = nil
+    @Environment(\.dismiss) private var dismiss
+
     @State private var seedText = "1337"
     @State private var seed: UInt64 = 1337
     @State private var rebuildToken = 0
@@ -74,10 +78,28 @@ struct ContentView: View {
                         DispatchQueue.main.async {
                             terrainRenderer = renderer
                             usesMetal4 = renderer.usesMetal4
+                            // Apply Metal version preference from settings
+                            let pref = UserDefaults.standard.string(forKey: "metalPreference") ?? "Auto"
+                            switch pref {
+                            case "Metal 3":
+                                renderer.metalVersionOverride = .metal3
+                            case "Metal 4":
+                                renderer.metalVersionOverride = .metal4
+                            default:
+                                renderer.metalVersionOverride = nil
+                            }
+                            // Rebuild pipelines with the override
+                            rebuildToken += 1
                         }
                     }
                 )
                 .ignoresSafeArea()
+                .onAppear {
+                    // Apply preset from main menu
+                    if let p = initialPreset {
+                        preset = p
+                    }
+                }
                 .onReceive(fpsTimer) { _ in
                     // Poll from timer (not render loop) to avoid
                     // "modifying state during view update".
@@ -92,6 +114,26 @@ struct ContentView: View {
                 }
 
                 // v1.0.0: command bar mode (default). Devtools mode shows classic UI.
+                // Menu button (top-left, back to main menu)
+                VStack {
+                    HStack {
+                        Button(action: { dismiss() }) {
+                            Text("☰ Menu")
+                                .font(.title2)
+                                .bold()
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(Color.black.opacity(0.7))
+                                .cornerRadius(10)
+                        }
+                        .padding(.top, 50)
+                        .padding(.leading, 12)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+
                 if !devtoolsMode {
                     VStack {
                         Spacer()

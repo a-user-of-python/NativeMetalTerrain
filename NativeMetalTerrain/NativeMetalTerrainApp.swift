@@ -5,7 +5,7 @@ import SwiftUI
 struct NativeMetalTerrainApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainMenu()
         }
     }
 }
