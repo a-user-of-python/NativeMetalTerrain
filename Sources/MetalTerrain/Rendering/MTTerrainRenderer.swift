@@ -153,9 +153,10 @@ public final class MTTerrainRenderer {
     /// Local override for viewDistance. When nil, uses world.config.viewDistance.
     private var viewDistanceOverride: Int?
 
-    public init(device: MTLDevice, world: MTTerrainWorld) {
+    public init(device: MTLDevice, world: MTTerrainWorld, metalVersionOverride: MetalAPIVersion? = nil) {
         self.device = device
         self.world = world
+        self.metalVersionOverride = metalVersionOverride
         guard let queue = device.makeCommandQueue() else {
             preconditionFailure("MTTerrainRenderer: device.makeCommandQueue() failed")
         }

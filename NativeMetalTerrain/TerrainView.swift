@@ -71,6 +71,8 @@ struct TerrainView: UIViewRepresentable {
     /// v1.0.0: persistent config from commands. When set, rebuildWorld uses
     /// this instead of the default base config.
     @Binding var commandConfig: MTTerrainConfig?
+    /// v1.0.7: Metal version preference from settings.
+    @Binding var metalPreference: MetalPreference
     /// Mac Catalyst: what mouse-drag does (touch devices always orbit).
     @Binding var dragMode: DragMode
     /// Orbit vs first-person walk.
@@ -148,6 +150,7 @@ struct TerrainView: UIViewRepresentable {
             fogEnabled: .constant(true), viewDistance: .constant(6),
             shaderEffectsEnabled: .constant(false),
             commandConfig: .constant(nil),
+            metalPreference: .constant(.auto),
             dragMode: .constant(.orbit),
             cameraMode: .constant(.walk), playerHeight: .constant(2),
             moveInput: .constant(SIMD2<Float>(0, 0)),
@@ -297,7 +300,14 @@ struct TerrainView: UIViewRepresentable {
                 ))
             }
             self.world = world
-            let renderer = MTTerrainRenderer(device: device, world: world)
+            // v1.0.7: apply Metal version preference at creation (before pipelines build).
+            let metalOverride: MTTerrainRenderer.MetalAPIVersion?
+            switch parent.metalPreference {
+            case .metal3: metalOverride = .metal3
+            case .metal4: metalOverride = .metal4
+            case .auto: metalOverride = nil
+            }
+            let renderer = MTTerrainRenderer(device: device, world: world, metalVersionOverride: metalOverride)
             renderer.wireframe = parent.wireframe
             renderer.showsWater = parent.showsWater
             self.renderer = renderer

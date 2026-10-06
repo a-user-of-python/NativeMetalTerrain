@@ -74,6 +74,7 @@ struct ContentView: View {
                     viewDistance: $viewDistance,
                     shaderEffectsEnabled: $shaderEffectsEnabled,
                     commandConfig: $commandConfig,
+                    metalPreference: metalPreferenceBinding,
                     dragMode: $dragMode,
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
@@ -86,18 +87,6 @@ struct ContentView: View {
                         DispatchQueue.main.async {
                             terrainRenderer = renderer
                             usesMetal4 = renderer.usesMetal4
-                            // Apply Metal version preference from settings
-                            let pref = UserDefaults.standard.string(forKey: "metalPreference") ?? "Auto"
-                            switch pref {
-                            case "Metal 3":
-                                renderer.metalVersionOverride = .metal3
-                            case "Metal 4":
-                                renderer.metalVersionOverride = .metal4
-                            default:
-                                renderer.metalVersionOverride = nil
-                            }
-                            // Rebuild pipelines with the override
-                            rebuildToken += 1
                         }
                     }
                 )
@@ -472,6 +461,17 @@ struct ContentView: View {
             mountainSharpness: cfg.mountainSharpness
         )
         savedWorlds.save(world)
+    }
+
+    /// Reads the Metal preference from UserDefaults (set in Settings).
+    private var metalPreferenceBinding: Binding<MetalPreference> {
+        Binding(
+            get: {
+                let raw = UserDefaults.standard.string(forKey: "metalPreference") ?? "Auto"
+                return MetalPreference(rawValue: raw) ?? .auto
+            },
+            set: { _ in }  // Read-only here; Settings view writes it
+        )
     }
 
     private var panel: some View {

@@ -27,7 +27,7 @@ struct SettingsView: View {
             }
 
             Section(header: Text("About").font(.title2)) {
-                Text("NativeMetalTerrain v1.0.2")
+                Text("NativeMetalTerrain")
                     .font(.title3)
                 Text("Procedural 3D terrain on Metal")
                     .font(.body)
