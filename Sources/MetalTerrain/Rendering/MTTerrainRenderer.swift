@@ -83,6 +83,14 @@ private struct MTInstanceData {
     var tint: SIMD4<Float>  // rgb = color tint
 }
 
+/// Must match `MTWaterParams` in MTShaders.metal (48 bytes: 3x float4).
+/// Uses SIMD4 packing to match Metal's float3+float 16-byte alignment.
+private struct MTWaterParams {
+    var deepAndSpeed: SIMD4<Float>    // rgb = deep color, w = wave speed
+    var shallowAndAmp: SIMD4<Float>   // rgb = shallow color, w = wave amplitude
+    var opacityAndPad: SIMD4<Float>   // x = opacity, yzw = padding
+}
+
 // MARK: - Renderer
 
 /// Renders an `MTTerrainWorld` with Metal.
@@ -112,6 +120,26 @@ public final class MTTerrainRenderer {
     public var wireframe: Bool = false
     public var showsWater: Bool = true
     public var fogEnabled: Bool = true
+    /// Water deep color (linear RGB). Updates the water params buffer.
+    public var waterDeepColor: SIMD3<Float> = SIMD3<Float>(0.01, 0.22, 0.35) {
+        didSet { updateWaterParams() }
+    }
+    /// Water shallow color (linear RGB). Updates the water params buffer.
+    public var waterShallowColor: SIMD3<Float> = SIMD3<Float>(0.15, 0.55, 0.65) {
+        didSet { updateWaterParams() }
+    }
+    /// Water wave animation speed multiplier (0...3). Updates the water params buffer.
+    public var waveSpeed: Float = 1.0 {
+        didSet { waveSpeed = min(max(0, waveSpeed), 3); updateWaterParams() }
+    }
+    /// Water wave normal strength multiplier (0...2). Updates the water params buffer.
+    public var waveAmplitude: Float = 1.0 {
+        didSet { waveAmplitude = min(max(0, waveAmplitude), 2); updateWaterParams() }
+    }
+    /// Water opacity (0...1). Multiplied with the alpha buffer. Updates the water params buffer.
+    public var waterOpacity: Float = 0.82 {
+        didSet { waterOpacity = min(max(0, waterOpacity), 1); updateWaterParams() }
+    }
     /// Sun position: azimuth (0-360°, direction) and elevation (0-90°, height).
     public var sunAzimuth: Float = 45
     public var sunElevation: Float = 50
@@ -127,6 +155,13 @@ public final class MTTerrainRenderer {
     /// Created by default; set to nil to disable. The sun position mirrors
     /// `sunAzimuth`/`sunElevation` automatically.
     public var skybox: MTSkybox?
+    /// Re-enables the skybox after it was set to nil. Creates a new MTSkybox
+    /// with the current device.
+    public func enableSkybox() {
+        if skybox == nil {
+            skybox = MTSkybox(device: device)
+        }
+    }
     /// Hardware ray-traced shadow acceleration structures (M3+/A17 Pro+).
     /// Nil when the device lacks hardware ray tracing or the build omits
     /// the M3_FEATURES compilation condition. Created in `init`; the TLAS
@@ -171,6 +206,13 @@ public final class MTTerrainRenderer {
         buildDepthStates()
         buildUniformBuffer()
         buildWaterMesh()
+        // Initialize water params from world config.
+        waterDeepColor = world.config.waterDeepColor
+        waterShallowColor = world.config.waterShallowColor
+        waveSpeed = world.config.waveSpeed
+        waveAmplitude = world.config.waveAmplitude
+        waterOpacity = world.config.waterOpacity
+        buildWaterParamsBuffer()
         loadStructureMeshes()
         // Skybox works on all devices (standard Metal 3).
         self.skybox = MTSkybox(device: device)
@@ -502,6 +544,9 @@ public final class MTTerrainRenderer {
             bindUniforms(encoder, slot: waterSlot)
             var alpha = waterAlpha
             encoder.setFragmentBytes(&alpha, length: MemoryLayout<Float>.stride, index: 2)
+            if let wpb = waterParamsBuffer {
+                encoder.setFragmentBuffer(wpb, offset: 0, index: 3)
+            }
             encoder.setVertexBuffer(wvb, offset: 0, index: 0)
             encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: waterIndexCount,
@@ -827,6 +872,7 @@ public final class MTTerrainRenderer {
     private var waterVertexBuffer: MTLBuffer?
     private var waterIndexBuffer: MTLBuffer?
     private var waterIndexCount = 0
+    private var waterParamsBuffer: MTLBuffer?
 
     private struct StructureMesh {
         var vertexBuffer: MTLBuffer
@@ -1180,6 +1226,26 @@ public final class MTTerrainRenderer {
         waterVertexBuffer = sharedBuffer(from: mesh.vertices)
         waterIndexBuffer = sharedBuffer(from: mesh.indices)
         waterIndexCount = mesh.indices.count
+    }
+
+    /// Creates the water params buffer and fills it with current values.
+    private func buildWaterParamsBuffer() {
+        precondition(MemoryLayout<MTWaterParams>.stride == 48,
+                     "MTWaterParams layout drifted from MTShaders.metal")
+        waterParamsBuffer = device.makeBuffer(length: MemoryLayout<MTWaterParams>.stride,
+                                              options: .storageModeShared)
+        updateWaterParams()
+    }
+
+    /// Updates the water params buffer from the current public property values.
+    private func updateWaterParams() {
+        guard let buffer = waterParamsBuffer else { return }
+        var params = MTWaterParams(
+            deepAndSpeed: SIMD4<Float>(waterDeepColor.x, waterDeepColor.y, waterDeepColor.z, waveSpeed),
+            shallowAndAmp: SIMD4<Float>(waterShallowColor.x, waterShallowColor.y, waterShallowColor.z, waveAmplitude),
+            opacityAndPad: SIMD4<Float>(waterOpacity, 0, 0, 0)
+        )
+        buffer.contents().copyMemory(from: &params, byteCount: MemoryLayout<MTWaterParams>.stride)
     }
 
     // MARK: Structures

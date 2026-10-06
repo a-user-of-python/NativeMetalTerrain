@@ -15,7 +15,7 @@ public struct MTTerrainConfig {
     public var structureNoise: MTNoiseConfig
     public var structuresEnabled: Bool    // default true
     public var structureDensity: Float    // 0...1, default 0.35
-    public var waterColor: SIMD3<Float>   // linear RGB
+    public var waterColor: SIMD3<Float>   // linear RGB (DEPRECATED: use waterDeepColor/waterShallowColor)
     public var fogColor: SIMD3<Float>      // linear RGB
     public var fogDensity: Float
     // v1.0.5: new customizable settings
@@ -24,6 +24,12 @@ public struct MTTerrainConfig {
     public var continentScale: Float      // multiplier, default 1.0
     public var riverScale: Float           // multiplier, default 1.0
     public var mountainSharpness: Float   // power exponent, default 0.72
+    // Water controls: colors and animation
+    public var waterDeepColor: SIMD3<Float>    // linear RGB, default (0.01, 0.22, 0.35)
+    public var waterShallowColor: SIMD3<Float> // linear RGB, default (0.15, 0.55, 0.65)
+    public var waveSpeed: Float                // animation speed multiplier, 0...3, default 1.0
+    public var waveAmplitude: Float            // wave normal strength, 0...2, default 1.0
+    public var waterOpacity: Float             // 0...1, default 0.82
 
     public init(
         chunkResolution: Int = 250,
@@ -46,7 +52,12 @@ public struct MTTerrainConfig {
         sunIntensity: Float = 1.0,
         continentScale: Float = 1.0,
         riverScale: Float = 1.0,
-        mountainSharpness: Float = 0.72
+        mountainSharpness: Float = 0.72,
+        waterDeepColor: SIMD3<Float> = SIMD3<Float>(0.01, 0.22, 0.35),
+        waterShallowColor: SIMD3<Float> = SIMD3<Float>(0.15, 0.55, 0.65),
+        waveSpeed: Float = 1.0,
+        waveAmplitude: Float = 1.0,
+        waterOpacity: Float = 0.82
     ) {
         // Clamp to safe ranges to prevent crashes from extreme slider values.
         // chunkResolution * chunkWorldSize * viewDistance determines memory;
@@ -69,6 +80,11 @@ public struct MTTerrainConfig {
         self.continentScale = min(max(0.1, continentScale), 5.0)
         self.riverScale = min(max(0.1, riverScale), 5.0)
         self.mountainSharpness = min(max(0.1, mountainSharpness), 2.0)
+        self.waterDeepColor = waterDeepColor
+        self.waterShallowColor = waterShallowColor
+        self.waveSpeed = min(max(0, waveSpeed), 3)
+        self.waveAmplitude = min(max(0, waveAmplitude), 2)
+        self.waterOpacity = min(max(0, waterOpacity), 1)
     }
 
     /// Sensible defaults for every field.

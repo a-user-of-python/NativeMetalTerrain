@@ -208,7 +208,41 @@ struct ContentView: View {
                                 showsWater: $showsWater,
                                 fogEnabled: $fogEnabled,
                                 shaderEffectsEnabled: $shaderEffectsEnabled,
-                                viewDistance: $viewDistance
+                                viewDistance: $viewDistance,
+                                sunAzimuth: Binding(
+                                    get: { terrainRenderer?.sunAzimuth ?? 45 },
+                                    set: { terrainRenderer?.sunAzimuth = $0 }
+                                ),
+                                sunElevation: Binding(
+                                    get: { terrainRenderer?.sunElevation ?? 50 },
+                                    set: { terrainRenderer?.sunElevation = $0 }
+                                ),
+                                skyboxEnabled: Binding(
+                                    get: { terrainRenderer?.skybox != nil },
+                                    set: { newValue in
+                                        if newValue {
+                                            terrainRenderer?.enableSkybox()
+                                        } else {
+                                            terrainRenderer?.skybox = nil
+                                        }
+                                    }
+                                ),
+                                detailAmount: Binding(
+                                    get: { terrainRenderer?.detailAmount ?? 1.0 },
+                                    set: { terrainRenderer?.detailAmount = $0 }
+                                ),
+                                waveSpeed: Binding(
+                                    get: { terrainRenderer?.waveSpeed ?? 1.0 },
+                                    set: { terrainRenderer?.waveSpeed = $0 }
+                                ),
+                                waveAmplitude: Binding(
+                                    get: { terrainRenderer?.waveAmplitude ?? 1.0 },
+                                    set: { terrainRenderer?.waveAmplitude = $0 }
+                                ),
+                                waterOpacity: Binding(
+                                    get: { terrainRenderer?.waterOpacity ?? 0.82 },
+                                    set: { terrainRenderer?.waterOpacity = $0 }
+                                )
                             )
                             .navigationTitle("Controls")
                             .navigationBarTitleDisplayMode(.inline)

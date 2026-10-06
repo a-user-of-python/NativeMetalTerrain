@@ -131,6 +131,16 @@ struct ControlShelf: View {
     @Binding var fogEnabled: Bool
     @Binding var shaderEffectsEnabled: Bool
     @Binding var viewDistance: Int
+    // Sun position (renderer, not config)
+    @Binding var sunAzimuth: Float
+    @Binding var sunElevation: Float
+    // Skybox and detail (renderer)
+    @Binding var skyboxEnabled: Bool
+    @Binding var detailAmount: Float
+    // Water controls (renderer, live-update)
+    @Binding var waveSpeed: Float
+    @Binding var waveAmplitude: Float
+    @Binding var waterOpacity: Float
 
     var body: some View {
         List {
@@ -195,6 +205,8 @@ struct ControlShelf: View {
             Section(header: hdr("Lighting")) {
                 SettingSlider(label: "Ambient Light", value: fltD($config.ambientIntensity), range: 0...1, step: 0.01)
                 SettingSlider(label: "Sun Intensity", value: fltD($config.sunIntensity), range: 0...2, step: 0.05)
+                SettingSlider(label: "Sun Azimuth", value: fltD($sunAzimuth), range: 0...360, step: 1, format: "%.0f°")
+                SettingSlider(label: "Sun Elevation", value: fltD($sunElevation), range: -10...90, step: 1, format: "%.0f°")
                 SettingSlider(label: "Fog Density", value: fltD($config.fogDensity), range: 0...0.1, step: 0.001, format: "%.4f")
             }
 
@@ -203,6 +215,14 @@ struct ControlShelf: View {
                 SettingToggle(label: "Water", value: $showsWater)
                 SettingToggle(label: "Fog", value: $fogEnabled)
                 SettingToggle(label: "Shader Effects", value: $shaderEffectsEnabled)
+                SettingToggle(label: "Skybox", value: $skyboxEnabled)
+                SettingSlider(label: "Detail Amount", value: fltD($detailAmount), range: 0...1, step: 0.01)
+            }
+
+            Section(header: hdr("Water")) {
+                SettingSlider(label: "Wave Speed", value: fltD($waveSpeed), range: 0...3, step: 0.05)
+                SettingSlider(label: "Wave Height", value: fltD($waveAmplitude), range: 0...2, step: 0.05)
+                SettingSlider(label: "Opacity", value: fltD($waterOpacity), range: 0...1, step: 0.01)
             }
         }
         .listStyle(.insetGrouped)

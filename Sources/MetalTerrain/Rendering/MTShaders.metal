@@ -35,6 +35,14 @@ struct MTInstanceData {
     float4 tint;        // rgb = color tint
 };
 
+// Water rendering parameters. Must match MTWaterParams in
+// MTTerrainRenderer.swift (48 bytes: 3x float4).
+struct MTWaterParams {
+    float4 deepAndSpeed;     // rgb = deep color, w = wave speed multiplier
+    float4 shallowAndAmp;    // rgb = shallow color, w = wave amplitude multiplier
+    float4 opacityAndPad;    // x = opacity, yzw = padding
+};
+
 struct MTVaryings {
     float4 clipPos [[position]];
     float3 worldPos;
@@ -209,31 +217,34 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
 // shader texture, not the physical triangles. No shore-specific effects.
 fragment float4 water_fragment(MTVaryings in [[stage_in]],
                                constant MTUniforms &uniforms [[buffer(1)]],
-                               constant float &alpha [[buffer(2)]]) {
+                               constant float &alpha [[buffer(2)]],
+                               constant MTWaterParams &waterParams [[buffer(3)]]) {
     float t = uniforms.misc.x;
+    float waveSpeed = waterParams.deepAndSpeed.w;
+    float waveAmp = waterParams.shallowAndAmp.w;
     float2 p = in.worldPos.xz;
 
     // Animated wave normals (texture only, not geometry).
     float2 grad = float2(0.0);
-    grad += 0.14 * float2(cos(dot(p, float2(0.11, 0.07)) + t * 0.9),
-                          cos(dot(p, float2(-0.06, 0.13)) + t * 0.7));
-    grad += 0.09 * float2(cos(dot(p, float2(0.31, -0.24)) + t * 1.7),
-                          cos(dot(p, float2(0.22, 0.35)) + t * 1.3));
-    float n1 = fract(sin(dot(floor(p * 2.0 + t * 0.5), float2(12.9898, 78.233))) * 43758.5453);
-    float n2 = fract(sin(dot(floor(p * 2.0 - t * 0.3), float2(39.346, 11.135))) * 24634.6345);
-    grad += (float2(n1, n2) - 0.5) * 0.22;
+    grad += (0.14 * waveAmp) * float2(cos(dot(p, float2(0.11, 0.07)) + t * 0.9 * waveSpeed),
+                                     cos(dot(p, float2(-0.06, 0.13)) + t * 0.7 * waveSpeed));
+    grad += (0.09 * waveAmp) * float2(cos(dot(p, float2(0.31, -0.24)) + t * 1.7 * waveSpeed),
+                                     cos(dot(p, float2(0.22, 0.35)) + t * 1.3 * waveSpeed));
+    float n1 = fract(sin(dot(floor(p * 2.0 + t * 0.5 * waveSpeed), float2(12.9898, 78.233))) * 43758.5453);
+    float n2 = fract(sin(dot(floor(p * 2.0 - t * 0.3 * waveSpeed), float2(39.346, 11.135))) * 24634.6345);
+    grad += (float2(n1, n2) - 0.5) * (0.22 * waveAmp);
 
     float3 n = normalize(float3(-grad.x, 1.0, -grad.y));
 
     // Procedural texture: scrolling noise layers.
-    float2 uv1 = p * 0.05 + float2(t * 0.03, t * 0.017);
-    float2 uv2 = p * 0.11 - float2(t * 0.021, t * 0.038);
+    float2 uv1 = p * 0.05 + float2(t * 0.03 * waveSpeed, t * 0.017 * waveSpeed);
+    float2 uv2 = p * 0.11 - float2(t * 0.021 * waveSpeed, t * 0.038 * waveSpeed);
     float tex1 = fract(sin(dot(floor(uv1 * 8.0), float2(12.9898, 78.233))) * 43758.5453);
     float tex2 = fract(sin(dot(floor(uv2 * 8.0), float2(39.346, 11.135))) * 24634.6345);
     float texture_ = (tex1 * 0.6 + tex2 * 0.4);
 
-    float3 deepColor = float3(0.01, 0.22, 0.35);
-    float3 shallowColor = float3(0.15, 0.55, 0.65);
+    float3 deepColor = waterParams.deepAndSpeed.rgb;
+    float3 shallowColor = waterParams.shallowAndAmp.rgb;
     float3 base = mix(deepColor, shallowColor, texture_ * 0.55);
 
     float3 viewDir = normalize(uniforms.cameraPos.xyz - in.worldPos);
@@ -252,7 +263,10 @@ fragment float4 water_fragment(MTVaryings in [[stage_in]],
     float fogFactor = 1.0 - exp(-dist * uniforms.fogColor.w);
     col = mix(col, uniforms.fogColor.rgb, fogFactor);
 
-    return float4(col, alpha);
+    // waterParams.opacity replaces the alpha buffer (default 0.82 matches
+    // the original waterAlpha for identical visuals).
+    float opacity = waterParams.opacityAndPad.x;
+    return float4(col, opacity);
 }
 
 // Structures: per-instance model matrix + color tint from the instance buffer.
