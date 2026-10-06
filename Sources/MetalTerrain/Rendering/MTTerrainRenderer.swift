@@ -63,7 +63,7 @@ private func mtUniformScale(_ s: Float) -> simd_float4x4 {
 // MARK: - Shader-visible structs
 
 /// Must match `MTUniforms` in MTShaders.metal (192 bytes).
-/// Uniform block uploaded per frame. 192 bytes, all 16-byte aligned.
+/// Uniform block uploaded per frame. 224 bytes, all 16-byte aligned.
 /// Swift's `SIMD3<Float>` is 16-byte aligned (unlike Metal's 12-byte
 /// `float3`), so small fields are packed into `SIMD4`s to keep the layout
 /// identical on both sides. Must match `MTUniforms` in MTShaders.metal.
@@ -75,6 +75,7 @@ private struct MTUniforms {
     var lightDir: SIMD4<Float>   // xyz = light direction, w = ambient
     var misc: SIMD4<Float>       // x = time seconds
     var seaLevel: SIMD4<Float>   // x = normalized sea level (0...1)
+    var sunColor: SIMD4<Float>   // rgb = sun tint, w = unused
 }
 
 /// Must match `MTInstanceData` in MTShaders.metal (80 bytes).
@@ -143,6 +144,29 @@ public final class MTTerrainRenderer {
     /// Sun position: azimuth (0-360°, direction) and elevation (0-90°, height).
     public var sunAzimuth: Float = 45
     public var sunElevation: Float = 50
+    /// Time of day in hours (0...24). When `timeOfDayEnabled` is true, the
+    /// renderer advances this automatically and drives `sunAzimuth`,
+    /// `sunElevation` and `sunColor` from it. Default 12 (noon).
+    public var timeOfDay: Float = 12 {
+        didSet {
+            timeOfDay = min(max(0, timeOfDay), 24)
+            if timeOfDayEnabled { applyTimeOfDay() }
+        }
+    }
+    /// When true, `update(cameraTarget:)` advances `timeOfDay` every frame
+    /// and overrides the sun position/color. Default false: manual
+    /// `sunAzimuth`/`sunElevation` control keeps working as before.
+    public var timeOfDayEnabled: Bool = false {
+        didSet { if timeOfDayEnabled { applyTimeOfDay() } }
+    }
+    /// Game-hours advanced per real minute (0...60). Default 1.0.
+    public var timeOfDaySpeed: Float = 1.0 {
+        didSet { timeOfDaySpeed = min(max(0, timeOfDaySpeed), 60) }
+    }
+    /// Sun tint (rgb) applied to terrain lighting. Updated automatically
+    /// from `timeOfDay` when `timeOfDayEnabled`; settable manually otherwise.
+    /// Default matches the previous hardcoded warm glint.
+    public var sunColor: SIMD3<Float> = SIMD3<Float>(1.0, 0.98, 0.92)
     /// Last measured FPS (written by the demo's render loop, polled by UI).
     public var currentFPS: Double = 0
     /// GPU memory currently allocated by Metal, in MB (for stats overlay).
@@ -160,6 +184,54 @@ public final class MTTerrainRenderer {
     public func enableSkybox() {
         if skybox == nil {
             skybox = MTSkybox(device: device)
+        }
+    }
+
+    // MARK: - Time of day
+
+    /// Advances the time-of-day clock by `dt` seconds and maps it onto the
+    /// sun position/color. Called automatically from `update(cameraTarget:)`;
+    /// no-op unless `timeOfDayEnabled` is true.
+    public func updateTimeOfDay(dt: Float) {
+        guard timeOfDayEnabled, dt > 0 else { return }
+        // timeOfDaySpeed is game-hours per real minute.
+        timeOfDay = (timeOfDay + dt * timeOfDaySpeed / 60.0).truncatingRemainder(dividingBy: 24.0)
+        // didSet on timeOfDay calls applyTimeOfDay() when enabled.
+    }
+
+    /// Maps the current `timeOfDay` onto `sunAzimuth`, `sunElevation` and
+    /// `sunColor`. Public so apps can set `timeOfDay` manually and apply it.
+    ///   6h = sunrise (az 90°, el 0°) · 12h = noon (az 180°, el 70°)
+    ///   18h = sunset (az 270°, el 0°) · 0h = midnight (el -30°)
+    public func applyTimeOfDay() {
+        let t = timeOfDay
+        // Azimuth sweeps 15°/hour: east at 6h, south at 12h, west at 18h.
+        sunAzimuth = (90 + (t - 6) * 15).truncatingRemainder(dividingBy: 360)
+        if sunAzimuth < 0 { sunAzimuth += 360 }
+        // Elevation: sine arc, +70° at noon, -30° at midnight.
+        let s = sin(2 * Float.pi * (t - 6) / 24)
+        sunElevation = s >= 0 ? s * 70 : s * 30
+        sunColor = Self.sunColorForElevation(sunElevation)
+        // The skybox reads sunElevation every frame (day/dusk/night
+        // gradients), so it follows automatically.
+    }
+
+    /// Sun tint for a given elevation in degrees: warm orange at the
+    /// horizon, white at noon, cool moonlight below the horizon.
+    public static func sunColorForElevation(_ elevation: Float) -> SIMD3<Float> {
+        let warm = SIMD3<Float>(1.0, 0.6, 0.4)
+        let noon = SIMD3<Float>(1.0, 0.98, 0.95)
+        let night = SIMD3<Float>(0.3, 0.4, 0.6)
+        let smooth: (Float) -> Float = { x in
+            let c = min(max(x, 0), 1)
+            return c * c * (3 - 2 * c)
+        }
+        if elevation >= 0 {
+            let k = smooth(elevation / 70)
+            return warm + (noon - warm) * k
+        } else {
+            let k = smooth(-elevation / 30)
+            return warm + (night - warm) * k
         }
     }
     /// Hardware ray-traced shadow acceleration structures (M3+/A17 Pro+).
@@ -187,6 +259,9 @@ public final class MTTerrainRenderer {
     }
     /// Local override for viewDistance. When nil, uses world.config.viewDistance.
     private var viewDistanceOverride: Int?
+    /// Wall-clock time of the last `update(cameraTarget:)` call, for the
+    /// time-of-day clock delta.
+    private var lastUpdateTime: Double?
 
     public init(device: MTLDevice, world: MTTerrainWorld, metalVersionOverride: MetalAPIVersion? = nil) {
         self.device = device
@@ -197,7 +272,7 @@ public final class MTTerrainRenderer {
         }
         self.commandQueue = queue
         self.uniformStride = MemoryLayout<MTUniforms>.stride
-        precondition(uniformStride == 208, "MTUniforms layout drifted from MTShaders.metal")
+        precondition(uniformStride == 224, "MTUniforms layout drifted from MTShaders.metal")
         // Metal requires buffer offsets bound via setVertexBuffer/setFragmentBuffer
         // to be multiples of 256. MTUniforms is 192 bytes, so pad the stride.
         self.uniformStrideAligned = (uniformStride + 255) & ~255
@@ -242,6 +317,13 @@ public final class MTTerrainRenderer {
     /// ever grows/shrinks by finished meshes, so `draw` never blocks.
     public func update(cameraTarget: SIMD2<Float>) {
         lastCameraTarget = cameraTarget
+        // Time-of-day clock: advances even when the camera is still, so it
+        // runs before the early-return below.
+        let now = Date().timeIntervalSince1970
+        if let last = lastUpdateTime {
+            updateTimeOfDay(dt: Float(now - last))
+        }
+        lastUpdateTime = now
         // If the user replaced `world.config`, drop stale chunk meshes and
         // rebuild the water plane (its size/level come from the config).
         let version = world.configVersion
@@ -1116,7 +1198,8 @@ public final class MTTerrainRenderer {
             lightDir: SIMD4<Float>(normalize(sunDir), cfg.ambientIntensity),
             misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0,
                                wireframe ? 1 : 0, detailAmount),
-            seaLevel: SIMD4<Float>(world.worldY(forHeight: cfg.seaLevel), cfg.sunIntensity, 0, 0)
+            seaLevel: SIMD4<Float>(world.worldY(forHeight: cfg.seaLevel), cfg.sunIntensity, 0, 0),
+            sunColor: SIMD4<Float>(sunColor, 1)
         )
         var copy = u
         let dst = uniformBuffer.contents().advanced(by: slot * uniformStrideAligned)

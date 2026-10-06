@@ -141,6 +141,10 @@ struct ControlShelf: View {
     @Binding var waveSpeed: Float
     @Binding var waveAmplitude: Float
     @Binding var waterOpacity: Float
+    // Time of day (renderer)
+    @Binding var timeOfDay: Float
+    @Binding var timeOfDayEnabled: Bool
+    @Binding var timeOfDaySpeed: Float
 
     var body: some View {
         List {
@@ -223,6 +227,12 @@ struct ControlShelf: View {
                 SettingSlider(label: "Wave Speed", value: fltD($waveSpeed), range: 0...3, step: 0.05)
                 SettingSlider(label: "Wave Height", value: fltD($waveAmplitude), range: 0...2, step: 0.05)
                 SettingSlider(label: "Opacity", value: fltD($waterOpacity), range: 0...1, step: 0.01)
+            }
+
+            Section(header: hdr("Time of Day")) {
+                SettingToggle(label: "Animate Time", value: $timeOfDayEnabled)
+                SettingSlider(label: "Time", value: fltD($timeOfDay), range: 0...24, step: 0.1, format: "%.1fh")
+                SettingSlider(label: "Speed", value: fltD($timeOfDaySpeed), range: 0...60, step: 0.5, format: "%.1f")
             }
         }
         .listStyle(.insetGrouped)

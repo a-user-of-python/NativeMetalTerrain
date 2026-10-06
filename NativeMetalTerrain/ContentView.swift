@@ -242,6 +242,18 @@ struct ContentView: View {
                                 waterOpacity: Binding(
                                     get: { terrainRenderer?.waterOpacity ?? 0.82 },
                                     set: { terrainRenderer?.waterOpacity = $0 }
+                                ),
+                                timeOfDay: Binding(
+                                    get: { terrainRenderer?.timeOfDay ?? 12 },
+                                    set: { terrainRenderer?.timeOfDay = $0 }
+                                ),
+                                timeOfDayEnabled: Binding(
+                                    get: { terrainRenderer?.timeOfDayEnabled ?? false },
+                                    set: { terrainRenderer?.timeOfDayEnabled = $0 }
+                                ),
+                                timeOfDaySpeed: Binding(
+                                    get: { terrainRenderer?.timeOfDaySpeed ?? 1.0 },
+                                    set: { terrainRenderer?.timeOfDaySpeed = $0 }
                                 )
                             )
                             .navigationTitle("Controls")

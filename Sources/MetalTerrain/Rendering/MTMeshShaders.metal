@@ -93,7 +93,7 @@ struct MTMeshBiome {
                          // z = hasSlopeColor 0/1, w = isSnowyPeak 0/1
 };
 
-/// Must stay layout-identical to `MTUniforms` in MTShaders.metal (208
+/// Must stay layout-identical to `MTUniforms` in MTShaders.metal (224
 /// bytes). The fragment shader below reads the same uniform buffer the
 /// renderer already binds at fragment buffer(1) for the standard path.
 struct MTUniforms {
@@ -104,6 +104,8 @@ struct MTUniforms {
     float4 lightDir;    // xyz = light direction, w = ambient strength
     float4 misc;        // x = time seconds, y = shader effects (0/1)
     float4 seaLevel;    // x = world-space water level (for shoreline foam)
+    float4 sunColor;    // rgb = sun tint (time-of-day), w = unused
+};
 };
 
 /// Mesh-stage vertex output. Field-for-field identical to `MTVaryings` in
@@ -296,10 +298,10 @@ float3 meshApplyLighting(float3 albedo,
     // Fresnel rim: subtle edge definition (kept low to avoid plastic look).
     float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.12;
 
-    float3 lit = albedo * (amb + wrapNdl * (1.0 - amb));
+    float3 lit = albedo * (amb + wrapNdl * (1.0 - amb) * uniforms.sunColor.rgb);
     // Shader effects (specular + fresnel) are toggleable.
     if (uniforms.misc.y > 0.5) {
-        lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint
+        lit += spec * uniforms.sunColor.rgb;  // sun-tinted glint
         lit += fresnel * albedo;
     }
 

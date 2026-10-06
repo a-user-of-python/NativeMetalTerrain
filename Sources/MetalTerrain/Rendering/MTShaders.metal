@@ -27,6 +27,7 @@ struct MTUniforms {
     float4 lightDir;    // xyz = light direction, w = ambient strength
     float4 misc;        // x = time, y = shaderFX (0/1), z = wireframe (0/1), w = detailAmount
     float4 seaLevel;    // x = world-space water level (for shoreline foam)
+    float4 sunColor;    // rgb = sun tint (time-of-day), w = unused
 };
 
 // Must match MTInstanceData in MTTerrainRenderer.swift (80 bytes).
@@ -153,10 +154,10 @@ float3 applyLighting(float3 albedo,
     // Fresnel rim: subtle edge definition (kept low to avoid plastic look).
     float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.12;
 
-    float3 lit = albedo * (amb + wrapNdl * sunIntensity * (1.0 - amb));
+    float3 lit = albedo * (amb + wrapNdl * sunIntensity * (1.0 - amb) * uniforms.sunColor.rgb);
     // Shader effects (specular + fresnel) are toggleable.
     if (uniforms.misc.y > 0.5) {
-        lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint
+        lit += spec * uniforms.sunColor.rgb;  // sun-tinted glint
         lit += fresnel * albedo;
     }
 
@@ -257,7 +258,7 @@ fragment float4 water_fragment(MTVaryings in [[stage_in]],
     float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
     float3 skyReflect = float3(0.40, 0.60, 0.75) * fres * 0.7;
 
-    float3 col = base * (0.45 + diff * 0.75) + spec * float3(1.0, 0.95, 0.85) + skyReflect;
+    float3 col = base * (0.45 + diff * 0.75) + spec * uniforms.sunColor.rgb + skyReflect;
 
     float dist = length(in.worldPos - uniforms.cameraPos.xyz);
     float fogFactor = 1.0 - exp(-dist * uniforms.fogColor.w);
