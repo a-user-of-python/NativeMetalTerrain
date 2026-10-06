@@ -27,6 +27,13 @@ struct ContentView: View {
     @State private var fps: Double = 0
     // Renderer ref for direct sun updates (bypasses SwiftUI re-render).
     @State private var terrainRenderer: MTTerrainRenderer?
+    /// v1.0.14: holds renderer-only settings from a loaded saved world until
+    /// the fresh renderer is created (applied in onRendererReady).
+    @State private var pendingSavedRenderer: SavedWorld?
+    /// The rebuildToken value the pending settings belong to. Guards against
+    /// a race where the initial pre-load rebuild's onRendererReady fires after
+    /// the load path ran (its async block must not consume the settings).
+    @State private var pendingRendererToken: Int?
     /// Polls renderer.currentFPS 2x/sec (avoids render-loop @State writes).
     private let fpsTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var shaderEffectsEnabled = true
@@ -82,11 +89,45 @@ struct ContentView: View {
                     carActive: $carActive,
                     simulatorMode: $simulatorMode,
                     onRendererReady: { renderer in
+                        // Capture synchronously: this closure was created during
+                        // the body evaluation whose rebuildToken value triggered
+                        // this rebuild, so tokenAtBuild identifies this renderer.
+                        let tokenAtBuild = rebuildToken
                         // Dispatch async: setting @State during updateUIView
                         // triggers "modifying state during view update".
                         DispatchQueue.main.async {
                             terrainRenderer = renderer
                             usesMetal4 = renderer.usesMetal4
+                            // v1.0.14: apply renderer-only settings from a loaded
+                            // saved world (config fields were already set on the
+                            // MTTerrainConfig before the rebuild). Only the
+                            // renderer built for the load's token consumes them —
+                            // an earlier pre-load rebuild must not steal them.
+                            if let saved = pendingSavedRenderer,
+                               let pendingToken = pendingRendererToken,
+                               tokenAtBuild == pendingToken {
+                                pendingSavedRenderer = nil
+                                pendingRendererToken = nil
+                                // Time-of-day first: setting it while disabled
+                                // just stores the clock value.
+                                renderer.timeOfDay = saved.timeOfDay ?? 12
+                                renderer.timeOfDaySpeed = saved.timeOfDaySpeed ?? 1.0
+                                // Manual sun position (overridden below if
+                                // time animation is enabled).
+                                renderer.sunAzimuth = saved.sunAzimuth ?? 45
+                                renderer.sunElevation = saved.sunElevation ?? 50
+                                // Enable last: triggers applyTimeOfDay() which
+                                // recomputes sun position from the clock.
+                                renderer.timeOfDayEnabled = saved.timeOfDayEnabled ?? false
+                                if saved.skyboxEnabled ?? true {
+                                    renderer.enableSkybox()
+                                } else {
+                                    renderer.skybox = nil
+                                }
+                                renderer.detailAmount = saved.detailAmount ?? 1.0
+                                renderer.cloudAmount = saved.cloudAmount ?? 0.4
+                                renderer.starsEnabled = saved.starsEnabled ?? true
+                            }
                         }
                     }
                 )
@@ -138,10 +179,31 @@ struct ContentView: View {
                         cfg.continentScale = saved.continentScale
                         cfg.riverScale = saved.riverScale
                         cfg.mountainSharpness = saved.mountainSharpness
+                        // v1.0.11+: water + per-structure weights are config
+                        // fields — the new renderer picks them up at init.
+                        // Missing keys (old saves) fall back to defaults.
+                        cfg.structureKindWeights = saved.structureKindWeights ?? [:]
+                        cfg.waveSpeed = saved.waveSpeed ?? 1.0
+                        cfg.waveAmplitude = saved.waveAmplitude ?? 1.0
+                        cfg.waterOpacity = saved.waterOpacity ?? 0.82
+                        cfg.waterDeepColor = SIMD3<Float>(
+                            saved.waterDeepR ?? 0.01,
+                            saved.waterDeepG ?? 0.22,
+                            saved.waterDeepB ?? 0.35)
+                        cfg.waterShallowColor = SIMD3<Float>(
+                            saved.waterShallowR ?? 0.15,
+                            saved.waterShallowG ?? 0.55,
+                            saved.waterShallowB ?? 0.65)
                         commandConfig = cfg
                         shelfConfig = cfg
                         shelfInitialized = true
+                        // Renderer-only settings (sun, skybox, time-of-day,
+                        // clouds, stars, detail) are applied in onRendererReady
+                        // once the fresh renderer exists. Tag them with the new
+                        // token so a stale pre-load rebuild can't consume them.
                         rebuildToken += 1
+                        pendingSavedRenderer = saved
+                        pendingRendererToken = rebuildToken
                     }
                 }
                 .onReceive(fpsTimer) { _ in
@@ -242,6 +304,14 @@ struct ContentView: View {
                                 waterOpacity: Binding(
                                     get: { terrainRenderer?.waterOpacity ?? 0.82 },
                                     set: { terrainRenderer?.waterOpacity = $0 }
+                                ),
+                                waterDeepColor: Binding(
+                                    get: { terrainRenderer?.waterDeepColor ?? SIMD3<Float>(0.01, 0.22, 0.35) },
+                                    set: { terrainRenderer?.waterDeepColor = $0 }
+                                ),
+                                waterShallowColor: Binding(
+                                    get: { terrainRenderer?.waterShallowColor ?? SIMD3<Float>(0.15, 0.55, 0.65) },
+                                    set: { terrainRenderer?.waterShallowColor = $0 }
                                 ),
                                 timeOfDay: Binding(
                                     get: { terrainRenderer?.timeOfDay ?? 12 },
@@ -516,6 +586,9 @@ struct ContentView: View {
     /// Save the current world (seed + preset + config) to the store.
     private func saveCurrentWorld(name: String) {
         let cfg = shelfInitialized ? shelfConfig : (terrainRenderer?.world.config ?? .auto)
+        let r = terrainRenderer
+        let deepColor = r?.waterDeepColor ?? cfg.waterDeepColor
+        let shallowColor = r?.waterShallowColor ?? cfg.waterShallowColor
         let world = SavedWorld(
             name: name,
             seed: seed,
@@ -548,7 +621,29 @@ struct ContentView: View {
             sunIntensity: cfg.sunIntensity,
             continentScale: cfg.continentScale,
             riverScale: cfg.riverScale,
-            mountainSharpness: cfg.mountainSharpness
+            mountainSharpness: cfg.mountainSharpness,
+            // v1.0.11+: renderer is the live source; fall back to config.
+            waveSpeed: r?.waveSpeed ?? cfg.waveSpeed,
+            waveAmplitude: r?.waveAmplitude ?? cfg.waveAmplitude,
+            waterOpacity: r?.waterOpacity ?? cfg.waterOpacity,
+            waterDeepR: deepColor.x,
+            waterDeepG: deepColor.y,
+            waterDeepB: deepColor.z,
+            waterShallowR: shallowColor.x,
+            waterShallowG: shallowColor.y,
+            waterShallowB: shallowColor.z,
+            sunAzimuth: r?.sunAzimuth ?? 45,
+            sunElevation: r?.sunElevation ?? 50,
+            skyboxEnabled: r.map { $0.skybox != nil } ?? true,
+            detailAmount: r?.detailAmount ?? 1.0,
+            // v1.0.12+
+            timeOfDay: r?.timeOfDay ?? 12,
+            timeOfDayEnabled: r?.timeOfDayEnabled ?? false,
+            timeOfDaySpeed: r?.timeOfDaySpeed ?? 1.0,
+            // v1.0.13+
+            cloudAmount: r?.cloudAmount ?? 0.4,
+            starsEnabled: r?.starsEnabled ?? true,
+            structureKindWeights: cfg.structureKindWeights
         )
         savedWorlds.save(world)
     }

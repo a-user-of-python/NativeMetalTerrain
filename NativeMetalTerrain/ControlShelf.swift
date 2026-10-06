@@ -41,6 +41,28 @@ struct SavedWorld: Codable, Identifiable {
     var continentScale: Float
     var riverScale: Float
     var mountainSharpness: Float
+    // v1.0.11: water + sun + skybox + detail (all optional for backward compat)
+    var waveSpeed: Float? = nil
+    var waveAmplitude: Float? = nil
+    var waterOpacity: Float? = nil
+    var waterDeepR: Float? = nil
+    var waterDeepG: Float? = nil
+    var waterDeepB: Float? = nil
+    var waterShallowR: Float? = nil
+    var waterShallowG: Float? = nil
+    var waterShallowB: Float? = nil
+    var sunAzimuth: Float? = nil
+    var sunElevation: Float? = nil
+    var skyboxEnabled: Bool? = nil
+    var detailAmount: Float? = nil
+    // v1.0.12: time of day
+    var timeOfDay: Float? = nil
+    var timeOfDayEnabled: Bool? = nil
+    var timeOfDaySpeed: Float? = nil
+    // v1.0.13: sky + per-structure weights
+    var cloudAmount: Float? = nil
+    var starsEnabled: Bool? = nil
+    var structureKindWeights: [String: Float]? = nil
 
     var preset: BiomePreset {
         BiomePreset(rawValue: presetRaw) ?? .default
@@ -103,6 +125,43 @@ struct SettingSlider: View {
     }
 }
 
+/// RGB color picker with three large sliders and a live preview swatch.
+struct SettingColorRGB: View {
+    var label: String
+    var color: Binding<SIMD3<Float>>
+
+    private func channel(_ i: Int) -> Binding<Double> {
+        Binding(
+            get: { Double(i == 0 ? color.wrappedValue.x : i == 1 ? color.wrappedValue.y : color.wrappedValue.z) },
+            set: {
+                var c = color.wrappedValue
+                let v = Float($0)
+                if i == 0 { c.x = v } else if i == 1 { c.y = v } else { c.z = v }
+                color.wrappedValue = c
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label).font(.title3).bold().foregroundColor(.white)
+                Spacer()
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(red: Double(color.wrappedValue.x),
+                                green: Double(color.wrappedValue.y),
+                                blue: Double(color.wrappedValue.z)))
+                    .frame(width: 60, height: 36)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.4), lineWidth: 1))
+            }
+            SettingSlider(label: "R", value: channel(0), range: 0...1, step: 0.01)
+            SettingSlider(label: "G", value: channel(1), range: 0...1, step: 0.01)
+            SettingSlider(label: "B", value: channel(2), range: 0...1, step: 0.01)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
 /// A labeled toggle.
 struct SettingToggle: View {
     var label: String
@@ -110,8 +169,7 @@ struct SettingToggle: View {
 
     var body: some View {
         Toggle(isOn: value) {
-            Text(label).font(.title3).bold().foregroundColor(.white)
-        }
+            Text(label).font(.title3).bold().foregroundColor(.white)        }
         .toggleStyle(SwitchToggleStyle(tint: .green))
         .padding(.vertical, 6)
     }
@@ -141,6 +199,8 @@ struct ControlShelf: View {
     @Binding var waveSpeed: Float
     @Binding var waveAmplitude: Float
     @Binding var waterOpacity: Float
+    @Binding var waterDeepColor: SIMD3<Float>
+    @Binding var waterShallowColor: SIMD3<Float>
     // Time of day (renderer)
     @Binding var timeOfDay: Float
     @Binding var timeOfDayEnabled: Bool
@@ -232,6 +292,8 @@ struct ControlShelf: View {
                 SettingSlider(label: "Wave Speed", value: fltD($waveSpeed), range: 0...3, step: 0.05)
                 SettingSlider(label: "Wave Height", value: fltD($waveAmplitude), range: 0...2, step: 0.05)
                 SettingSlider(label: "Opacity", value: fltD($waterOpacity), range: 0...1, step: 0.01)
+                SettingColorRGB(label: "Deep Color", color: $waterDeepColor)
+                SettingColorRGB(label: "Shallow Color", color: $waterShallowColor)
             }
 
             Section(header: hdr("Time of Day")) {
