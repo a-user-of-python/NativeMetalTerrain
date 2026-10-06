@@ -357,7 +357,7 @@ public final class MTTerrainRenderer {
             }
         }
 
-        let now = Date().timeIntervalSince1970
+        let now2 = Date().timeIntervalSince1970
         var toBuild: [MTChunkCoord] = []
         cacheLock.lock()
         // Evict anything well outside the view radius (+1 chunk buffer).
@@ -379,7 +379,7 @@ public final class MTTerrainRenderer {
         }
         for coord in needed {
             if var mesh = chunkCache[coord] {
-                mesh.lastUsed = now
+                mesh.lastUsed = now2
                 chunkCache[coord] = mesh
             } else if !pendingBuilds.contains(coord) {
                 pendingBuilds.insert(coord)
