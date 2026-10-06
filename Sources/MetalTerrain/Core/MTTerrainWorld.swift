@@ -309,10 +309,10 @@ public final class MTTerrainWorld {
             guard totalWeight > 0 else { continue }
             // Weighted pick via cumulative weights (t in 0...1).
             let pick = t * Double(totalWeight)
-            var cumulative: Float = 0
+            var cumulative: Double = 0
             var kindIndex = kinds.count - 1  // fallback covers t == 1.0
             for i in 0..<kinds.count {
-                cumulative += kindWeights[i]
+                cumulative += Double(kindWeights[i])
                 if pick < cumulative {
                     kindIndex = i
                     break
