@@ -38,8 +38,6 @@ struct ContentView: View {
     @State private var commandText = ""
     @State private var outputMessage: String? = nil
     @State private var outputIsError = false
-    /// Timer to auto-dismiss output message.
-    @State private var outputDismissWorkItem: DispatchWorkItem? = nil
 
     var body: some View {
         GeometryReader { geo in
