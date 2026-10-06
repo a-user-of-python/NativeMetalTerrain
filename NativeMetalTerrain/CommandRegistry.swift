@@ -382,6 +382,134 @@ struct CommandRegistry {
                 return .success("structuredensity set to \(v)")
             },
 
+            // MARK: - Structure Noise (controls where structures spawn)
+            TerrainCommand(
+                name: "structoctaves",
+                description: "Structure noise octaves (1-12)",
+                usage: "structoctaves <1-12>"
+            ) { args, ctx in
+                guard args.count == 1, let v = Int(args[0]), (1...12).contains(v) else {
+                    return .error("syntax error: usage: structoctaves <1-12>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.octaves = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structoctaves set to \(v)")
+            },
+            TerrainCommand(
+                name: "structfrequency",
+                description: "Structure noise base frequency",
+                usage: "structfrequency <value>"
+            ) { args, ctx in
+                guard args.count == 1, let v = Double(args[0]), v > 0 else {
+                    return .error("syntax error: usage: structfrequency <value>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.baseFrequency = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structfrequency set to \(v)")
+            },
+            TerrainCommand(
+                name: "structamplitude",
+                description: "Structure noise amplitude",
+                usage: "structamplitude <value>"
+            ) { args, ctx in
+                guard args.count == 1, let v = Double(args[0]), v > 0 else {
+                    return .error("syntax error: usage: structamplitude <value>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.amplitude = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structamplitude set to \(v)")
+            },
+            TerrainCommand(
+                name: "structlacunarity",
+                description: "Structure noise lacunarity",
+                usage: "structlacunarity <value>"
+            ) { args, ctx in
+                guard args.count == 1, let v = Double(args[0]), v > 0 else {
+                    return .error("syntax error: usage: structlacunarity <value>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.lacunarity = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structlacunarity set to \(v)")
+            },
+            TerrainCommand(
+                name: "structgain",
+                description: "Structure noise gain",
+                usage: "structgain <value>"
+            ) { args, ctx in
+                guard args.count == 1, let v = Double(args[0]), v > 0 else {
+                    return .error("syntax error: usage: structgain <value>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.gain = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structgain set to \(v)")
+            },
+            TerrainCommand(
+                name: "structwarpstrength",
+                description: "Structure noise warp strength (0 = off)",
+                usage: "structwarpstrength <value>"
+            ) { args, ctx in
+                guard args.count == 1, let v = Double(args[0]), v >= 0 else {
+                    return .error("syntax error: usage: structwarpstrength <value>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.warpStrength = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structwarpstrength set to \(v)")
+            },
+            TerrainCommand(
+                name: "structwarpfrequency",
+                description: "Structure noise warp frequency",
+                usage: "structwarpfrequency <value>"
+            ) { args, ctx in
+                guard args.count == 1, let v = Double(args[0]), v > 0 else {
+                    return .error("syntax error: usage: structwarpfrequency <value>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.warpFrequency = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structwarpfrequency set to \(v)")
+            },
+            TerrainCommand(
+                name: "structridged",
+                description: "Structure noise ridged mode (on/off)",
+                usage: "structridged <on|off>"
+            ) { args, ctx in
+                guard args.count == 1 else {
+                    return .error("syntax error: usage: structridged <on|off>")
+                }
+                let v: Bool
+                switch args[0].lowercased() {
+                case "on": v = true
+                case "off": v = false
+                default: return .error("syntax error: usage: structridged <on|off>")
+                }
+                guard let world = ctx.getWorld() else { return .error("no world") }
+                var cfg = world.config
+                cfg.structureNoise.ridged = v
+                world.config = cfg
+                ctx.onWorldRebuild()
+                return .success("structridged set to \(v ? "on" : "off")")
+            },
+
             // MARK: - Colors
             TerrainCommand(
                 name: "watercolor",

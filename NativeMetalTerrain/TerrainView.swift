@@ -68,6 +68,9 @@ struct TerrainView: UIViewRepresentable {
     @Binding var fogEnabled: Bool
     @Binding var viewDistance: Int
     @Binding var shaderEffectsEnabled: Bool
+    /// v1.0.0: persistent config from commands. When set, rebuildWorld uses
+    /// this instead of the default base config.
+    @Binding var commandConfig: MTTerrainConfig?
     /// Mac Catalyst: what mouse-drag does (touch devices always orbit).
     @Binding var dragMode: DragMode
     /// Orbit vs first-person walk.
@@ -144,6 +147,7 @@ struct TerrainView: UIViewRepresentable {
             wireframe: .constant(false), showsWater: .constant(true),
             fogEnabled: .constant(true), viewDistance: .constant(6),
             shaderEffectsEnabled: .constant(false),
+            commandConfig: .constant(nil),
             dragMode: .constant(.orbit),
             cameraMode: .constant(.walk), playerHeight: .constant(2),
             moveInput: .constant(SIMD2<Float>(0, 0)),
@@ -256,7 +260,8 @@ struct TerrainView: UIViewRepresentable {
 
             // Simulator mode: manual toggle overrides auto-detection.
             // Auto-enabled in Xcode Simulator; toggleable in Debug menu.
-            let baseConfig: MTTerrainConfig = parent.simulatorMode ? .simulator : .auto
+            // v1.0.0: if commands modified the config, use it instead of base.
+            let baseConfig: MTTerrainConfig = parent.commandConfig ?? (parent.simulatorMode ? .simulator : .auto)
 
             // ─────────────────────────────────────────────────────────
             // This is the whole integration:

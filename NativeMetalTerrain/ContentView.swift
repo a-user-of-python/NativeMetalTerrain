@@ -13,6 +13,9 @@ struct ContentView: View {
     @State private var wireframe = false
     @State private var showsWater = true
     @State private var fogEnabled = true
+    /// v1.0.0: persistent config modified by commands. When set, rebuildWorld
+    /// uses this instead of the default base config, so command changes survive.
+    @State private var commandConfig: MTTerrainConfig? = nil
     @State private var viewDistance = 6
     @State private var cameraMode: CameraMode = .walk
     @State private var playerHeight: Float = 2
@@ -53,6 +56,7 @@ struct ContentView: View {
                     fogEnabled: $fogEnabled,
                     viewDistance: $viewDistance,
                     shaderEffectsEnabled: $shaderEffectsEnabled,
+                    commandConfig: $commandConfig,
                     dragMode: $dragMode,
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
@@ -214,13 +218,29 @@ struct ContentView: View {
             // Commands that modify world terrain/noise config need a full
             // world rebuild to take effect. Renderer-only commands (colors,
             // wireframe, sun, etc.) apply immediately without rebuild.
+            //
+            // CRITICAL: The rebuild creates a new world from scratch, so we
+            // must persist the modified config/seed in State BEFORE bumping
+            // the token, otherwise the changes are lost.
             let worldModifying: Set<String> = [
                 "seed", "chunksize", "chunkresolution", "sealevel",
                 "heightscale", "mountainmax", "octaves", "frequency",
                 "amplitude", "lacunarity", "gain", "warpstrength",
-                "warpfrequency", "ridged", "structures", "structuredensity"
+                "warpfrequency", "ridged", "structures", "structuredensity",
+                "structoctaves", "structfrequency", "structamplitude",
+                "structlacunarity", "structgain", "structwarpstrength",
+                "structwarpfrequency", "structridged"
             ]
             if worldModifying.contains(cmd.name) {
+                // Persist the modified config so rebuildWorld uses it
+                if let world = ctx.getWorld() {
+                    commandConfig = world.config
+                }
+                // Persist seed change in State (rebuildWorld uses parent.seed)
+                if cmd.name == "seed", let world = ctx.getWorld() {
+                    seed = world.seed
+                    seedText = String(world.seed)
+                }
                 rebuildToken += 1
             }
         case .error(let msg):
