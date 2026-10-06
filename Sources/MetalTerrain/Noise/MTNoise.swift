@@ -276,7 +276,7 @@ func mtHeightSampleField(x: Double, y: Double, field: MTHeightFieldConfig,
     // Round the peaks: pow <1 softens the sharp ridged cusps.
     // M4: use LUT instead of pow() (~75 cycles -> 1 array access).
     let rounded = fastPow072(Float(max(0, ridged)))
-    let mountains = rounded * mountainMask * mountainMask
+    let mountains = Double(rounded) * mountainMask * mountainMask
 
     // ── Rivers: wide carved valleys along low-frequency meanders ──
     // Lower frequency = longer, more continuous rivers that reach the ocean.
