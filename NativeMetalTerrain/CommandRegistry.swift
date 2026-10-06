@@ -1,4 +1,5 @@
 import Foundation
+import MetalTerrain
 
 /// Result of executing a command.
 enum CommandResult {

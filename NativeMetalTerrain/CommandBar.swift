@@ -1,4 +1,5 @@
 import SwiftUI
+import MetalTerrain
 
 /// Command bar UI for v1.0.0.
 /// A single command button expands into a field with autocomplete.
