@@ -96,6 +96,53 @@ struct ContentView: View {
                     if let p = initialPreset {
                         preset = p
                     }
+                    // Check for pending saved world to load
+                    if let data = UserDefaults.standard.data(forKey: "pendingSavedWorld"),
+                       let saved = try? JSONDecoder().decode(SavedWorld.self, from: data) {
+                        // Clear the pending flag
+                        UserDefaults.standard.removeObject(forKey: "pendingSavedWorld")
+                        UserDefaults.standard.removeObject(forKey: "pendingPreset")
+                        UserDefaults.standard.removeObject(forKey: "pendingSeed")
+                        // Apply saved values
+                        seed = saved.seed
+                        seedText = String(saved.seed)
+                        preset = saved.preset
+                        viewDistance = saved.viewDistance
+                        // Build config from saved values
+                        var cfg = MTTerrainConfig()
+                        cfg.chunkWorldSize = saved.chunkWorldSize
+                        cfg.chunkResolution = saved.chunkResolution
+                        cfg.seaLevel = saved.seaLevel
+                        cfg.heightScale = saved.heightScale
+                        cfg.noise.octaves = saved.octaves
+                        cfg.noise.baseFrequency = saved.frequency
+                        cfg.noise.amplitude = saved.amplitude
+                        cfg.noise.lacunarity = saved.lacunarity
+                        cfg.noise.gain = saved.gain
+                        cfg.noise.warpStrength = saved.warpStrength
+                        cfg.noise.warpFrequency = saved.warpFrequency
+                        cfg.noise.ridged = saved.ridged
+                        cfg.structureNoise.octaves = saved.structOctaves
+                        cfg.structureNoise.baseFrequency = saved.structFrequency
+                        cfg.structureNoise.amplitude = saved.structAmplitude
+                        cfg.structureNoise.lacunarity = saved.structLacunarity
+                        cfg.structureNoise.gain = saved.structGain
+                        cfg.structureNoise.warpStrength = saved.structWarpStrength
+                        cfg.structureNoise.warpFrequency = saved.structWarpFrequency
+                        cfg.structureNoise.ridged = saved.structRidged
+                        cfg.structureDensity = saved.structureDensity
+                        cfg.structuresEnabled = saved.structuresEnabled
+                        cfg.fogDensity = saved.fogDensity
+                        cfg.ambientIntensity = saved.ambientIntensity
+                        cfg.sunIntensity = saved.sunIntensity
+                        cfg.continentScale = saved.continentScale
+                        cfg.riverScale = saved.riverScale
+                        cfg.mountainSharpness = saved.mountainSharpness
+                        commandConfig = cfg
+                        shelfConfig = cfg
+                        shelfInitialized = true
+                        rebuildToken += 1
+                    }
                 }
                 .onReceive(fpsTimer) { _ in
                     // Poll from timer (not render loop) to avoid
@@ -111,25 +158,7 @@ struct ContentView: View {
                 }
 
                 // v1.0.0: command bar mode (default). Devtools mode shows classic UI.
-                // Menu button (top-left, back to main menu)
-                VStack {
-                    HStack {
-                        Button(action: { dismiss() }) {
-                            Text("☰ Menu")
-                                .font(.title2)
-                                .bold()
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color.black.opacity(0.7))
-                                .cornerRadius(10)
-                        }
-                        .padding(.top, 50)
-                        .padding(.leading, 12)
-                        Spacer()
-                    }
-                    Spacer()
-                }
+                // (Menu button removed in v1.0.9 — use the navigation back button.)
 
                 // v1.0.4: control shelf toggle (replaces command bar)
                 if !devtoolsMode {

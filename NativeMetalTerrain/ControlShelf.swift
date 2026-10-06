@@ -159,7 +159,7 @@ struct ControlShelf: View {
 
             Section(header: hdr("Terrain")) {
                 SettingSlider(label: "View Distance", value: intD($viewDistance), range: 1...10, step: 1, format: "%.0f")
-                SettingSlider(label: "Chunk Size", value: fltD($config.chunkWorldSize), range: 50...3000, step: 10, format: "%.0f")
+                SettingSlider(label: "Chunk Size", value: fltD($config.chunkWorldSize), range: 50...2000, step: 10, format: "%.0f")
                 SettingSlider(label: "Chunk Resolution", value: intD($config.chunkResolution), range: 32...250, step: 1, format: "%.0f")
                 SettingSlider(label: "Sea Level", value: fltD($config.seaLevel), range: 0...1, step: 0.01)
                 SettingSlider(label: "Height Scale", value: fltD($config.heightScale), range: 10...1000, step: 5, format: "%.0f")
