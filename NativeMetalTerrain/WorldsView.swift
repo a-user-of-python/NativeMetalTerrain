@@ -3,13 +3,13 @@ import SwiftUI
 /// Preset worlds list.
 struct WorldsView: View {
     var onSelect: (BiomePreset) -> Void
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         List(BiomePreset.allCases) { preset in
             Button(action: {
+                // Don't dismiss here — the fullScreenCover presents on top.
+                // Dismissing simultaneously causes a UIKit presentation crash.
                 onSelect(preset)
-                dismiss()
             }) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(preset.rawValue)

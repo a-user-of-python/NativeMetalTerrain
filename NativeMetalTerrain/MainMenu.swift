@@ -65,6 +65,13 @@ struct MainMenu: View {
             .fullScreenCover(item: $playPreset) { preset in
                 ContentView(initialPreset: preset)
             }
+            .onChange(of: playPreset) { newValue in
+                // When ContentView is dismissed (playPreset -> nil),
+                // also pop the Worlds view back to the main menu.
+                if newValue == nil {
+                    showWorlds = false
+                }
+            }
         }
         .preferredColorScheme(.dark)
     }
