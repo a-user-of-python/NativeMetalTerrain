@@ -27,6 +27,11 @@ struct ContentView: View {
     private let fpsTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var shaderEffectsEnabled = true
     @State private var usesMetal4 = false
+    /// v1.0.1: stats overlay (RAM/CPU/GPU) toggleable via `stats` command.
+    @State private var showStats = false
+    @State private var ramMB: Double = 0
+    @State private var cpuPercent: Double = 0
+    @State private var gpuMB: Double = 0
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
     /// Debug car (separate debug panel, app-only).
@@ -77,6 +82,13 @@ struct ContentView: View {
                     // Poll from timer (not render loop) to avoid
                     // "modifying state during view update".
                     if let r = terrainRenderer { fps = r.currentFPS }
+                    if showStats {
+                        ramMB = Self.appMemoryMB()
+                        cpuPercent = Self.appCPUPercent()
+                        if let r = terrainRenderer {
+                            gpuMB = Double(r.device.currentAllocatedSize) / 1_000_000
+                        }
+                    }
                 }
 
                 // v1.0.0: command bar mode (default). Devtools mode shows classic UI.
@@ -98,6 +110,30 @@ struct ContentView: View {
                             )
                         }
                         .padding()
+                    }
+                }
+
+                // v1.0.1: stats overlay (RAM/CPU/GPU) toggleable via `stats` command
+                if showStats {
+                    VStack {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(String(format: "RAM %.0f MB", ramMB))
+                                Text(String(format: "CPU %.0f%%", cpuPercent))
+                                Text(String(format: "GPU %.0f MB", gpuMB))
+                                Text(String(format: "FPS %.0f", fps))
+                            }
+                            .font(.headline)
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(8)
+                            Spacer()
+                        }
+                        .padding(.top, 50)
+                        .padding(.leading, 12)
+                        Spacer()
                     }
                 }
 
@@ -202,6 +238,28 @@ struct ContentView: View {
             return
         }
 
+        // Special: stats toggles the RAM/CPU/GPU overlay
+        if trimmed.lowercased().hasPrefix("stats") {
+            let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+            if parts.count == 2 {
+                switch parts[1].lowercased() {
+                case "on":
+                    showStats = true
+                    showOutput("stats on", isError: false)
+                case "off":
+                    showStats = false
+                    showOutput("stats off", isError: false)
+                default:
+                    showOutput("syntax error: usage: stats <on|off>", isError: true)
+                }
+            } else {
+                showOutput("syntax error: usage: stats <on|off>", isError: true)
+            }
+            commandText = ""
+            commandExpanded = false
+            return
+        }
+
         // Parse: first word is command name, rest are args
         let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
         guard let cmdName = parts.first else { return }
@@ -294,6 +352,42 @@ struct ContentView: View {
             onRegenerate: regenerate,
             onCloneWorld: cloneWorld
         )
+    }
+
+    /// App memory usage in MB (via mach task info).
+    static func appMemoryMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Double(info.resident_size) / 1_000_000
+    }
+
+    /// App CPU usage as percentage (via thread info).
+    static func appCPUPercent() -> Double {
+        var threads: thread_act_array_t?
+        var threadCount = mach_msg_type_number_t(0)
+        guard task_threads(mach_task_self_, &threads, &threadCount) == KERN_SUCCESS,
+              let threadList = threads else { return 0 }
+        var total: Double = 0
+        for i in 0..<Int(threadCount) {
+            var info = thread_basic_info()
+            var count = mach_msg_type_number_t(THREAD_INFO_MAX)
+            let result = withUnsafeMutablePointer(to: &info) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                    thread_info(threadList[i], thread_flavor_t(THREAD_BASIC_INFO), $0, &count)
+                }
+            }
+            if result == KERN_SUCCESS && (info.flags & TH_FLAGS_IDLE) == 0 {
+                total += Double(info.cpu_usage) / Double(TH_USAGE_SCALE) * 100
+            }
+        }
+        vm_deallocate(mach_task_self_, vm_address_t(bitPattern: threadList), vm_size_t(threadCount) * vm_size_t(MemoryLayout<thread_act_t>.size))
+        return total
     }
 
     /// Copies the current seed into the seed field so the user can tweak

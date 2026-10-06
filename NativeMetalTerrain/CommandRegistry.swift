@@ -566,6 +566,16 @@ struct CommandRegistry {
                 // ContentView clears commandConfig, resets seed, and rebuilds.
                 return .success("reset to defaults")
             },
+
+            // MARK: - Stats
+            TerrainCommand(
+                name: "stats",
+                description: "Show/hide RAM/CPU/GPU stats overlay",
+                usage: "stats <on|off>"
+            ) { args, ctx in
+                // Handled specially by ContentView; this is a placeholder.
+                return .success("stats toggled")
+            },
         ]
     }
 
