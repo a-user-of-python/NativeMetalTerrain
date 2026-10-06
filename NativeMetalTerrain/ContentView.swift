@@ -254,6 +254,21 @@ struct ContentView: View {
                                 timeOfDaySpeed: Binding(
                                     get: { terrainRenderer?.timeOfDaySpeed ?? 1.0 },
                                     set: { terrainRenderer?.timeOfDaySpeed = $0 }
+                                ),
+                                cloudAmount: Binding(
+                                    get: { terrainRenderer?.cloudAmount ?? 0.4 },
+                                    set: { terrainRenderer?.cloudAmount = $0 }
+                                ),
+                                starsEnabled: Binding(
+                                    get: { terrainRenderer?.starsEnabled ?? true },
+                                    set: { terrainRenderer?.starsEnabled = $0 }
+                                ),
+                                structureKindWeights: Binding(
+                                    get: { shelfConfig.structureKindWeights },
+                                    set: {
+                                        shelfConfig.structureKindWeights = $0
+                                        // Structure weights require rebuild (they affect placement)
+                                    }
                                 )
                             )
                             .navigationTitle("Controls")

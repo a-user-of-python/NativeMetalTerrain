@@ -186,6 +186,12 @@ public final class MTTerrainRenderer {
             skybox = MTSkybox(device: device)
         }
     }
+    /// Cloud coverage amount, 0...1 (0 = clear, 1 = overcast). Default 0.4.
+    /// Forwards to the skybox; also synced every frame in drawScene so it
+    /// stays correct even if the skybox was recreated via enableSkybox().
+    public var cloudAmount: Float = 0.4
+    /// Whether stars render at night. Default true. Forwards to the skybox.
+    public var starsEnabled: Bool = true
 
     // MARK: - Time of day
 
@@ -561,7 +567,9 @@ public final class MTTerrainRenderer {
         if let skybox = skybox {
             skybox.sunAzimuth = self.sunAzimuth
             skybox.sunElevation = self.sunElevation
-            skybox.draw(encoder: encoder, viewProjection: viewProj)
+            skybox.cloudAmount = self.cloudAmount
+            skybox.starsEnabled = self.starsEnabled
+            skybox.draw(encoder: encoder, viewProjection: viewProj, time: time)
             encoder.setDepthStencilState(depthState)
             encoder.setTriangleFillMode(.fill)
             encoder.setCullMode(.back)

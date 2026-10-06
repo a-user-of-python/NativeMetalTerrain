@@ -15,6 +15,7 @@ public struct MTTerrainConfig {
     public var structureNoise: MTNoiseConfig
     public var structuresEnabled: Bool    // default true
     public var structureDensity: Float    // 0...1, default 0.35
+    public var structureKindWeights: [String: Float]  // per-kind spawn weights, 0...10, default all 1.0
     public var waterColor: SIMD3<Float>   // linear RGB (DEPRECATED: use waterDeepColor/waterShallowColor)
     public var fogColor: SIMD3<Float>      // linear RGB
     public var fogDensity: Float
@@ -45,6 +46,7 @@ public struct MTTerrainConfig {
             warpStrength: 0.0, warpFrequency: 0.02, ridged: false),
         structuresEnabled: Bool = true,
         structureDensity: Float = 0.35,
+        structureKindWeights: [String: Float] = [:],
         waterColor: SIMD3<Float> = SIMD3<Float>(0.10, 0.35, 0.62),
         fogColor: SIMD3<Float> = SIMD3<Float>(0.62, 0.74, 0.86),
         fogDensity: Float = 0.0028,
@@ -72,6 +74,18 @@ public struct MTTerrainConfig {
         self.structureNoise = structureNoise
         self.structuresEnabled = structuresEnabled
         self.structureDensity = min(max(0, structureDensity), 1)
+        // Merge per-kind weights with defaults: missing keys = 1.0
+        // (equal weight, preserves legacy behavior). Clamp 0...10.
+        var mergedWeights: [String: Float] = [:]
+        for kind in MTStructureKind.allCases {
+            let w = structureKindWeights[kind.rawValue] ?? 1.0
+            mergedWeights[kind.rawValue] = min(max(w, 0), 10)
+        }
+        // Preserve any unknown keys (clamped), rather than silently dropping them.
+        for (key, value) in structureKindWeights where mergedWeights[key] == nil {
+            mergedWeights[key] = min(max(value, 0), 10)
+        }
+        self.structureKindWeights = mergedWeights
         self.waterColor = waterColor
         self.fogColor = fogColor
         self.fogDensity = max(0, fogDensity)

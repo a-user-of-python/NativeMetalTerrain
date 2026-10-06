@@ -145,6 +145,11 @@ struct ControlShelf: View {
     @Binding var timeOfDay: Float
     @Binding var timeOfDayEnabled: Bool
     @Binding var timeOfDaySpeed: Float
+    // Sky (renderer)
+    @Binding var cloudAmount: Float
+    @Binding var starsEnabled: Bool
+    // Structure weights (config dict)
+    @Binding var structureKindWeights: [String: Float]
 
     var body: some View {
         List {
@@ -233,6 +238,24 @@ struct ControlShelf: View {
                 SettingToggle(label: "Animate Time", value: $timeOfDayEnabled)
                 SettingSlider(label: "Time", value: fltD($timeOfDay), range: 0...24, step: 0.1, format: "%.1fh")
                 SettingSlider(label: "Speed", value: fltD($timeOfDaySpeed), range: 0...60, step: 0.5, format: "%.1f")
+            }
+
+            Section(header: hdr("Sky")) {
+                SettingSlider(label: "Clouds", value: fltD($cloudAmount), range: 0...1, step: 0.01)
+                SettingToggle(label: "Stars", value: $starsEnabled)
+            }
+
+            Section(header: hdr("Structures")) {
+                ForEach(["tree", "house", "tower", "boulder", "well", "windmill", "dungeon"], id: \.self) { kind in
+                    SettingSlider(
+                        label: kind.capitalized,
+                        value: Binding(
+                            get: { Double(structureKindWeights[kind] ?? 1.0) },
+                            set: { structureKindWeights[kind] = Float($0) }
+                        ),
+                        range: 0...5, step: 0.1
+                    )
+                }
             }
         }
         .listStyle(.insetGrouped)

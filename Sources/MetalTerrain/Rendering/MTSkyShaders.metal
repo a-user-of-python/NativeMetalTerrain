@@ -19,7 +19,8 @@ struct MTSkyUniforms {
     float4x4 viewProjInverse;  // inverse of the camera view-projection matrix
     float4 cameraPos;           // xyz = world-space camera position
     float4 sunDir;              // xyz = direction from the scene TOWARD the sun
-    float4 skyParams;           // x = sun elevation, radians
+    float4 skyParams;           // x = sun elevation (radians), y = time (seconds),
+                                // z = cloud amount (0...1), w = stars enabled (0/1)
 };
 
 struct MTSkyVaryings {
@@ -81,13 +82,62 @@ float3 skyColor(float3 viewDir, float sunElevation) {
     return col;
 }
 
+// Hash and 2D value noise for procedural clouds. Metal 3 compatible.
+float sky_hash12(float2 p) {
+    float3 p3 = fract(float3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float sky_vnoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(sky_hash12(i), sky_hash12(i + float2(1.0, 0.0)), u.x),
+               mix(sky_hash12(i + float2(0.0, 1.0)), sky_hash12(i + float2(1.0, 1.0)), u.x),
+               u.y);
+}
+
 fragment float4 sky_fragment(MTSkyVaryings in [[stage_in]],
                              constant MTSkyUniforms &uniforms [[buffer(0)]]) {
     float3 viewDir = normalize(in.viewDir);
     float3 sunDir = normalize(uniforms.sunDir.xyz);
     float elev = uniforms.skyParams.x;  // radians
+    float time = uniforms.skyParams.y;  // seconds
+    float cloudAmt = clamp(uniforms.skyParams.z, 0.0, 1.0);
+    float starsOn = uniforms.skyParams.w;
 
     float3 col = skyColor(viewDir, elev);
+    float dayAmt = smoothstep(-0.05, 0.30, elev);
+
+    // ── Clouds (before sun, so the sun disc draws over them) ──
+    // Procedural 2-octave value noise on a planar projection of viewDir.
+    // Only above the horizon; coverage from cloudAmt (0 = clear, 1 = overcast).
+    // Tinted by time of day: white at day, orange at dusk, dark at night.
+    if (cloudAmt > 0.001 && viewDir.y > 0.0) {
+        // Planar projection: divide xz by y for a stable sky dome mapping.
+        // The 0.12 floor avoids extreme stretching near the horizon.
+        float2 cuv = viewDir.xz / max(viewDir.y, 0.12);
+        // Slow drift with time for a living sky.
+        float2 drift = float2(time * 0.008, time * 0.005);
+        float c = sky_vnoise(cuv * 1.6 + drift) * 0.65
+                + sky_vnoise(cuv * 3.4 - drift * 0.7) * 0.35;
+        // Coverage: remap noise so cloudAmt controls how much of the sky
+        // is covered. Soft edges for a natural look.
+        float cover = smoothstep(1.0 - cloudAmt, 1.0 - cloudAmt + 0.45, c);
+        // Fade clouds near the horizon to avoid a hard band.
+        float horizFade = smoothstep(0.0, 0.18, viewDir.y);
+        // Cloud tint follows the sun: white at noon, orange at dusk, dark at night.
+        float duskAmt = clamp(1.0 - fabs(elev + 0.02) / 0.22, 0.0, 1.0) * (1.0 - dayAmt);
+        float3 dayCloud   = float3(0.98, 0.99, 1.00);
+        float3 duskCloud  = float3(1.00, 0.55, 0.30);
+        float3 nightCloud = float3(0.04, 0.05, 0.09);
+        float3 cloudCol = mix(nightCloud, dayCloud, dayAmt);
+        cloudCol = mix(cloudCol, duskCloud, duskAmt * 0.85);
+        // Soft alpha blend: clouds are semi-transparent, more opaque at center.
+        float alpha = cover * horizFade * 0.85;
+        col = mix(col, cloudCol, alpha);
+    }
 
     // Sun disc + glow. The disc is ~1.5-2 degrees across (cos thresholds
     // 0.9992..0.9997) so it stays clearly visible; the glow halo softens it.
@@ -99,9 +149,36 @@ fragment float4 sky_fragment(MTSkyVaryings in [[stage_in]],
                 + pow(max(cosA, 0.0),  24.0) * 0.18) * sunVis;
 
     // Sun tint follows the sky: white at noon, orange at sunset.
-    float dayAmt = smoothstep(-0.05, 0.30, elev);
     float3 sunTint = mix(float3(1.0, 0.45, 0.15), float3(1.0, 0.97, 0.90), dayAmt);
 
     col += disc * sunTint * 3.0 + glow * sunTint;
+
+    // ── Stars (after sun, so they draw over everything except terrain) ──
+    // Only visible at night, fading in as the sun drops below the horizon.
+    // Procedural star field: hash the view direction into cells, place a
+    // star in ~0.3% of cells with varying brightness and subtle twinkle.
+    // Stars are fixed to view direction (at infinity) and fade near the horizon.
+    float nightAmt = 1.0 - smoothstep(-0.12, 0.02, elev);
+    if (nightAmt > 0.003 && starsOn > 0.5 && viewDir.y > 0.0) {
+        float3 sd = viewDir * 300.0;
+        float3 cell = floor(sd);
+        float h = fract(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+        if (h > 0.997) {
+            // Star position within its cell; distance from center = size.
+            float3 f = fract(sd) - 0.5;
+            float d = length(f);
+            // Twinkle: subtle brightness oscillation, different phase/speed per star.
+            float tw = 0.65 + 0.35 * sin(time * (1.5 + h * 5.0) + h * 61.7);
+            // Brighter stars (higher h) are slightly larger.
+            float size = 0.06 + (h - 0.997) * 20.0;
+            float bright = smoothstep(size, 0.0, d) * tw;
+            // Vary star color slightly: blue-white to warm white.
+            float3 starCol = mix(float3(0.75, 0.85, 1.0), float3(1.0, 0.95, 0.85), fract(h * 7.31));
+            // Fade near the horizon and scale by night amount.
+            float horizonFade = smoothstep(0.02, 0.20, viewDir.y);
+            col += starCol * bright * nightAmt * horizonFade * 0.9;
+        }
+    }
+
     return float4(col, 1.0);
 }

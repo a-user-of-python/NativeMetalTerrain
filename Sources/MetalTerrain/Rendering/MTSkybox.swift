@@ -23,11 +23,13 @@ import simd
 
 /// Must match `MTSkyUniforms` in MTSkyShaders.metal (112 bytes).
 /// All 16-byte aligned: float4x4 (64) + 3x float4 (48).
+/// skyParams packs: x = sun elevation (radians), y = time (seconds),
+/// z = cloud amount (0...1), w = stars enabled (0/1).
 private struct MTSkyUniforms {
     var viewProjInverse: simd_float4x4
     var cameraPos: SIMD4<Float>  // xyz = world-space camera position
     var sunDir: SIMD4<Float>     // xyz = direction TOWARD the sun
-    var skyParams: SIMD4<Float>  // x = sun elevation, radians
+    var skyParams: SIMD4<Float>  // x = elevation, y = time, z = clouds, w = stars
 }
 
 /// A skybox: sky gradient + visible movable sun, rendered as one
@@ -45,6 +47,14 @@ public final class MTSkybox {
     /// Sun elevation in degrees. Positive = above the horizon (day),
     /// near 0 = sunset/sunrise tint, negative = night (sun hidden).
     public var sunElevation: Float = 50
+
+    /// Cloud coverage amount, 0...1. 0 = clear sky, 1 = overcast.
+    /// Default 0.4 gives soft scattered clouds. Passed to the shader
+    /// via skyParams.z.
+    public var cloudAmount: Float = 0.4
+    /// Whether stars are rendered at night. Default true. Passed to the
+    /// shader via skyParams.w (1 = on, 0 = off).
+    public var starsEnabled: Bool = true
 
     /// Compiles the sky pipeline from the default Metal library. The
     /// `.metal` file lives in the same target, so
@@ -116,8 +126,10 @@ public final class MTSkybox {
     ///   - encoder: The frame's render command encoder (created by the caller).
     ///   - viewProjection: The camera view-projection matrix for this frame
     ///     (the renderer's `viewProj`).
+    ///   - time: Elapsed time in seconds, drives star twinkle and cloud drift.
     public func draw(encoder: MTLRenderCommandEncoder,
-                     viewProjection: matrix_float4x4) {
+                     viewProjection: matrix_float4x4,
+                     time: Float = 0) {
         let inv = viewProjection.inverse
         // Recover the world-space camera position from the inverse
         // view-projection: the camera sits at the projection origin.
@@ -128,7 +140,9 @@ public final class MTSkybox {
             viewProjInverse: inv,
             cameraPos: SIMD4<Float>(camPos, 1),
             sunDir: SIMD4<Float>(sunDirection(), 0),
-            skyParams: SIMD4<Float>(sunElevation * .pi / 180, 0, 0, 0))
+            skyParams: SIMD4<Float>(sunElevation * .pi / 180, time,
+                                    min(max(cloudAmount, 0), 1),
+                                    starsEnabled ? 1 : 0))
 
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)

@@ -282,6 +282,15 @@ public final class MTTerrainWorld {
 
         var out: [MTStructurePlacement] = []
         let candidateCount = 12
+
+        // Per-kind spawn weights (default 1.0 each = legacy uniform behavior).
+        // Clamped here too, since the dict is mutable post-init.
+        let kinds = MTStructureKind.allCases
+        let kindWeights: [Float] = kinds.map { kind in
+            min(max(cfg.structureKindWeights[kind.rawValue] ?? 1.0, 0), 10)
+        }
+        let totalWeight = kindWeights.reduce(0, +)
+
         for _ in 0..<candidateCount {
             let px = x0 + rng.nextDouble() * size
             let pz = z0 + rng.nextDouble() * size
@@ -296,8 +305,19 @@ public final class MTTerrainWorld {
 
             let t = mtFBM01(config: structNoiseCfg,
                             x: px + 173.3, y: pz - 91.7, noise: kindNoise)
-            let kinds = MTStructureKind.allCases
-            let kindIndex = min(Int(t * Double(kinds.count)), kinds.count - 1)
+            // All weights zero -> no kind can spawn; skip this candidate.
+            guard totalWeight > 0 else { continue }
+            // Weighted pick via cumulative weights (t in 0...1).
+            let pick = t * totalWeight
+            var cumulative: Float = 0
+            var kindIndex = kinds.count - 1  // fallback covers t == 1.0
+            for i in 0..<kinds.count {
+                cumulative += kindWeights[i]
+                if pick < cumulative {
+                    kindIndex = i
+                    break
+                }
+            }
 
             out.append(MTStructurePlacement(
                 kind: kinds[kindIndex],
