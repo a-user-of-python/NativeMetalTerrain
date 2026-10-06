@@ -86,7 +86,7 @@ struct ContentView: View {
                         ramMB = Self.appMemoryMB()
                         cpuPercent = Self.appCPUPercent()
                         if let r = terrainRenderer {
-                            gpuMB = Double(r.device.currentAllocatedSize) / 1_000_000
+                            gpuMB = r.gpuAllocatedMB
                         }
                     }
                 }

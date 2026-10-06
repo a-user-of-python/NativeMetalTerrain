@@ -117,6 +117,10 @@ public final class MTTerrainRenderer {
     public var sunElevation: Float = 50
     /// Last measured FPS (written by the demo's render loop, polled by UI).
     public var currentFPS: Double = 0
+    /// GPU memory currently allocated by Metal, in MB (for stats overlay).
+    public var gpuAllocatedMB: Double {
+        Double(device.currentAllocatedSize) / 1_000_000
+    }
     /// Enhanced shader effects (specular + fresnel). Default off.
     public var shaderEffectsEnabled: Bool = false
     /// Skybox (sky gradient + visible sun), drawn first each frame.
