@@ -106,7 +106,6 @@ struct MTUniforms {
     float4 seaLevel;    // x = world-space water level (for shoreline foam)
     float4 sunColor;    // rgb = sun tint (time-of-day), w = unused
 };
-};
 
 /// Mesh-stage vertex output. Field-for-field identical to `MTVaryings` in
 /// MTShaders.metal so the fragment math below matches the standard path.
