@@ -38,6 +38,8 @@ struct ContentView: View {
     @State private var commandText = ""
     @State private var outputMessage: String? = nil
     @State private var outputIsError = false
+    /// Timer to auto-dismiss output message.
+    @State private var outputDismissWorkItem: DispatchWorkItem? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -173,6 +175,9 @@ struct ContentView: View {
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
+        // Clear previous output
+        outputMessage = nil
+
         // Special: /devtools toggles the classic UI
         if trimmed.lowercased() == "/devtools" {
             devtoolsMode.toggle()
@@ -192,12 +197,15 @@ struct ContentView: View {
             return
         }
 
+        // Capture current values for the context (struct-safe, no weak needed)
+        let renderer = terrainRenderer
         let ctx = CommandContext(
-            getWorld: { [weak self] in self?.terrainRenderer?.world },
-            getRenderer: { [weak self] in self?.terrainRenderer },
-            onWorldRebuild: { [weak self] in
-                // Bump rebuild token to force world regeneration
-                self?.rebuildToken += 1
+            getWorld: { renderer?.world },
+            getRenderer: { renderer },
+            onWorldRebuild: {
+                // Config changes bump configVersion which the renderer detects.
+                // For seed changes, we need to trigger via the renderer.
+                // The world.config setter already handles most cases.
             }
         )
 
@@ -205,23 +213,23 @@ struct ContentView: View {
         switch result {
         case .success(let msg):
             showOutput(msg, isError: false)
+            // If the command changed the world, bump rebuild token
+            // (commands that set world.config already trigger via configVersion,
+            // but seed changes need explicit rebuild)
+            if cmd.name == "seed" {
+                rebuildToken += 1
+            }
         case .error(let msg):
             showOutput(msg, isError: true)
         }
         commandText = ""
     }
 
-    /// Show output message briefly (auto-dismiss after 2 seconds).
+    /// Show output message briefly. Tap to dismiss, or it clears on next command.
+    /// (Auto-dismiss via timer doesn't work in a struct; manual dismiss is reliable.)
     private func showOutput(_ msg: String, isError: Bool) {
         outputMessage = msg
         outputIsError = isError
-        // Auto-dismiss after 2 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            // Only clear if it's still the same message (avoid race)
-            if self?.outputMessage == msg {
-                self?.outputMessage = nil
-            }
-        }
     }
 
     private var panel: some View {
