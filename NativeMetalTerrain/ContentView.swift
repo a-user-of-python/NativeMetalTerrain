@@ -44,8 +44,16 @@ struct ContentView: View {
     @State private var simulatorMode = MTTerrainConfig.isSimulator
     /// v1.0.0: command UI mode. When false, shows command bar. When true
     /// (via /devtools), shows the classic button panels.
+    /// v1.0.4: command bar replaced by control shelf (sliders).
     @State private var devtoolsMode = false
-    /// Command bar state.
+    @State private var showShelf = false
+    @StateObject private var savedWorlds = SavedWorldsStore()
+    @State private var saveName = ""
+    @State private var showSaveDialog = false
+    /// v1.0.4: control shelf (replaces command bar).
+    @State private var shelfConfig: MTTerrainConfig = .auto
+    @State private var shelfInitialized = false
+    /// Command bar state (deprecated in v1.0.4, kept for compatibility).
     @State private var commandExpanded = false
     @State private var commandText = ""
     @State private var outputMessage: String? = nil
@@ -134,24 +142,79 @@ struct ContentView: View {
                     Spacer()
                 }
 
+                // v1.0.4: control shelf toggle (replaces command bar)
                 if !devtoolsMode {
                     VStack {
                         Spacer()
                         HStack {
                             Spacer()
-                            CommandBar(
-                                isExpanded: $commandExpanded,
-                                commandText: $commandText,
-                                outputMessage: $outputMessage,
-                                outputIsError: $outputIsError,
-                                onSubmit: { cmd in executeCommand(cmd) },
-                                onSelectCommand: { cmd in
-                                    // Put command name in bar with trailing space
-                                    commandText = cmd.name + " "
+                            Button(action: {
+                                // Initialize shelf config from current world
+                                if let world = terrainRenderer?.world, !shelfInitialized {
+                                    shelfConfig = world.config
+                                    shelfInitialized = true
                                 }
-                            )
+                                showShelf = true
+                            }) {
+                                Text("🎛 Controls")
+                                    .font(.largeTitle)
+                                    .bold()
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 16)
+                                    .background(Color.green.opacity(0.85))
+                                    .cornerRadius(16)
+                            }
                         }
                         .padding()
+                    }
+                    .sheet(isPresented: $showShelf) {
+                        NavigationStack {
+                            ControlShelf(
+                                config: $shelfConfig,
+                                seedText: $seedText,
+                                onSeedApply: {
+                                    if let v = UInt64(seedText.trimmingCharacters(in: .whitespaces)) {
+                                        seed = v
+                                        rebuildToken += 1
+                                    }
+                                },
+                                onRandomSeed: {
+                                    let v = UInt64.random(in: 1...999999)
+                                    seed = v
+                                    seedText = String(v)
+                                    rebuildToken += 1
+                                },
+                                onSaveWorld: { showSaveDialog = true },
+                                wireframe: $wireframe,
+                                showsWater: $showsWater,
+                                fogEnabled: $fogEnabled,
+                                shaderEffectsEnabled: $shaderEffectsEnabled,
+                                viewDistance: $viewDistance
+                            )
+                            .navigationTitle("Controls")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") {
+                                        // Push config to world and rebuild
+                                        commandConfig = shelfConfig
+                                        shelfInitialized = false  // Re-init next open
+                                        rebuildToken += 1
+                                        showShelf = false
+                                    }
+                                    .font(.title2).bold()
+                                }
+                            }
+                        }
+                    }
+                    .alert("Save World", isPresented: $showSaveDialog) {
+                        TextField("Name", text: $saveName)
+                        Button("Save") {
+                            saveCurrentWorld(name: saveName.isEmpty ? "World \(savedWorlds.worlds.count + 1)" : saveName)
+                            saveName = ""
+                        }
+                        Button("Cancel", role: .cancel) { saveName = "" }
                     }
                 }
 
@@ -369,6 +432,41 @@ struct ContentView: View {
     private func showOutput(_ msg: String, isError: Bool) {
         outputMessage = msg
         outputIsError = isError
+    }
+
+    /// Save the current world (seed + preset + config) to the store.
+    private func saveCurrentWorld(name: String) {
+        let cfg = shelfInitialized ? shelfConfig : (terrainRenderer?.world.config ?? .auto)
+        let world = SavedWorld(
+            name: name,
+            seed: seed,
+            presetRaw: preset.rawValue,
+            chunkWorldSize: cfg.chunkWorldSize,
+            chunkResolution: cfg.chunkResolution,
+            seaLevel: cfg.seaLevel,
+            heightScale: cfg.heightScale,
+            viewDistance: viewDistance,
+            octaves: cfg.noise.octaves,
+            frequency: cfg.noise.baseFrequency,
+            amplitude: cfg.noise.amplitude,
+            lacunarity: cfg.noise.lacunarity,
+            gain: cfg.noise.gain,
+            warpStrength: cfg.noise.warpStrength,
+            warpFrequency: cfg.noise.warpFrequency,
+            ridged: cfg.noise.ridged,
+            structOctaves: cfg.structureNoise.octaves,
+            structFrequency: cfg.structureNoise.baseFrequency,
+            structAmplitude: cfg.structureNoise.amplitude,
+            structLacunarity: cfg.structureNoise.lacunarity,
+            structGain: cfg.structureNoise.gain,
+            structWarpStrength: cfg.structureNoise.warpStrength,
+            structWarpFrequency: cfg.structureNoise.warpFrequency,
+            structRidged: cfg.structureNoise.ridged,
+            structureDensity: cfg.structureDensity,
+            structuresEnabled: cfg.structuresEnabled,
+            fogDensity: cfg.fogDensity
+        )
+        savedWorlds.save(world)
     }
 
     private var panel: some View {
