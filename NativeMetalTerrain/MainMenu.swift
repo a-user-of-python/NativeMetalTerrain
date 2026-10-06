@@ -14,7 +14,8 @@ struct MainMenu: View {
 
     @State private var showWorlds = false
     @State private var showSettings = false
-    @State private var playPreset: BiomePreset? = nil
+    @State private var activePreset: BiomePreset? = nil
+    @State private var showGame = false
 
     var body: some View {
         NavigationStack {
@@ -34,7 +35,8 @@ struct MainMenu: View {
 
                 // Play — jumps into the last used world
                 Button(action: {
-                    playPreset = BiomePreset(rawValue: lastPresetRaw) ?? .default
+                    activePreset = BiomePreset(rawValue: lastPresetRaw) ?? .default
+                    showGame = true
                 }) {
                     menuButtonLabel("▶ Play", color: .green)
                 }
@@ -56,20 +58,16 @@ struct MainMenu: View {
             .navigationDestination(isPresented: $showWorlds) {
                 WorldsView(onSelect: { preset in
                     lastPresetRaw = preset.rawValue
-                    playPreset = preset
+                    activePreset = preset
+                    showGame = true
                 })
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsView()
             }
-            .fullScreenCover(item: $playPreset) { preset in
-                ContentView(initialPreset: preset)
-            }
-            .onChange(of: playPreset) { newValue in
-                // When ContentView is dismissed (playPreset -> nil),
-                // also pop the Worlds view back to the main menu.
-                if newValue == nil {
-                    showWorlds = false
+            .navigationDestination(isPresented: $showGame) {
+                if let preset = activePreset {
+                    ContentView(initialPreset: preset)
                 }
             }
         }
