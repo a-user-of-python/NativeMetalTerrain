@@ -67,7 +67,9 @@ public final class MTTerrainWorld {
     /// building them once and reusing them until the seed changes.
     /// Thread-safe: concurrent callers may build duplicate tables once,
     /// but never observe a torn pair.
-    private func noisePair() -> (MTPerlinNoise, MTPerlinNoise) {
+    /// Noise tables for mesh building. Internal for performance: lets
+    /// MTMeshBuilder hoist the pair once instead of taking locks per-vertex.
+    internal func noisePair() -> (MTPerlinNoise, MTPerlinNoise) {
         let currentSeed = seed  // single locked read; seed can't change mid-build
         noiseLock.lock()
         if cachedNoiseSeed != currentSeed || cachedNoise == nil {
@@ -207,19 +209,27 @@ public final class MTTerrainWorld {
         let (noise, warpNoise) = noisePair()
         // Hoist config.noise out of the inner loop: `config` is a locking
         // computed property, so accessing it per-vertex = 62.5K lock acquisitions.
-        let noiseConfig = config.noise
+        // M1: build the height field config once (avoids 4 struct copies/vertex).
+        let field = MTHeightFieldConfig(base: config.noise)
 
         var heights = [Float](repeating: 0, count: res * res)
+        // M3: track min/max in the fill loop (avoids two extra passes).
+        var minH: Float = .greatestFiniteMagnitude
+        var maxH: Float = -.greatestFiniteMagnitude
         for iz in 0..<res {
             let wz = z0 + Double(iz) * step
             for ix in 0..<res {
                 let wx = x0 + Double(ix) * step
-                heights[iz * res + ix] = mtHeightSample(
-                    x: wx, y: wz, config: noiseConfig,
+                let h = mtHeightSampleField(
+                    x: wx, y: wz, field: field,
                     noise: noise, warpNoise: warpNoise)
+                heights[iz * res + ix] = h
+                if h < minH { minH = h }
+                if h > maxH { maxH = h }
             }
         }
-        return MTChunk(coord: coord, heights: heights, resolution: res)
+        return MTChunk(coord: coord, heights: heights, resolution: res,
+                       minHeight: minH, maxHeight: maxH)
     }
 
     // MARK: - Structures
@@ -241,19 +251,27 @@ public final class MTTerrainWorld {
     public func structures(in coord: MTChunkCoord) -> [MTStructurePlacement] {
         guard structuresEnabled else { return [] }
 
-        let size = Double(config.chunkWorldSize)
+        // M6: hoist all locking property accesses (was ~29 locks/chunk).
+        let cfg = config
+        let size = Double(cfg.chunkWorldSize)
         let x0 = Double(coord.x) * size
         let z0 = Double(coord.z) * size
+        let structNoiseCfg = cfg.structureNoise
+        let threshold = 1.0 - Double(cfg.structureDensity)
+        let customB = customBiomes  // hoist (1 lock instead of per-access)
 
         var rng = MTSeededRandom(seed: chunkSeed(for: coord))
         let (densityNoise, kindNoise) = structureNoisePair()
 
         // Higher density -> lower keep threshold -> more structures.
-        let threshold = 1.0 - Double(config.structureDensity)
         let beachTop: Float =
-            customBiomes.first(where: { $0.name == "beach" })?.maxHeight
-            ?? config.biomes.first(where: { $0.name == "beach" })?.maxHeight
-            ?? (config.seaLevel + 0.04)
+            customB.first(where: { $0.name == "beach" })?.maxHeight
+            ?? cfg.biomes.first(where: { $0.name == "beach" })?.maxHeight
+            ?? (cfg.seaLevel + 0.04)
+
+        // Hoist noise pair for lock-free height sampling (avoid heightAt locks).
+        let (hNoise, hWarpNoise) = noisePair()
+        let hField = MTHeightFieldConfig(base: cfg.noise)
 
         var out: [MTStructurePlacement] = []
         let candidateCount = 12
@@ -261,14 +279,15 @@ public final class MTTerrainWorld {
             let px = x0 + rng.nextDouble() * size
             let pz = z0 + rng.nextDouble() * size
 
-            let density = mtFBM01(config: config.structureNoise,
+            let density = mtFBM01(config: structNoiseCfg,
                                   x: px, y: pz, noise: densityNoise)
             guard density > threshold else { continue }
 
-            let h = heightAt(x: px, z: pz)
+            let h = mtHeightSampleField(x: px, y: pz, field: hField,
+                                        noise: hNoise, warpNoise: hWarpNoise)
             guard h >= beachTop && h <= 0.85 else { continue }
 
-            let t = mtFBM01(config: config.structureNoise,
+            let t = mtFBM01(config: structNoiseCfg,
                             x: px + 173.3, y: pz - 91.7, noise: kindNoise)
             let kinds = MTStructureKind.allCases
             let kindIndex = min(Int(t * Double(kinds.count)), kinds.count - 1)

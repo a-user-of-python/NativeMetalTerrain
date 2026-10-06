@@ -14,7 +14,9 @@ import Foundation
 /// is a pure function of `(seed, x, y)`.
 public struct MTPerlinNoise {
     /// 512-entry permutation table (0...255 shuffled, then doubled).
-    private let perm: [Int]
+    /// Internal for performance: hot paths use `withUnsafeBufferPointer`
+    /// to avoid bounds checks (indices are always in-bounds via & 255).
+    internal let perm: [Int]
 
     /// Build the permutation table from `seed`.
     public init(seed: UInt64) {
@@ -38,27 +40,33 @@ public struct MTPerlinNoise {
         // Lattice coordinates, wrapped to [0, 256) via bitwise AND.
         // Identical to FP modulo for this range (perm table is 512 entries),
         // but ~20-50 cycles cheaper per call on ARM. Called ~2M times per chunk.
-        let xi = Int(floor(x)) & 255
-        let yi = Int(floor(y)) & 255
-        let xf = x - floor(x)
-        let yf = y - floor(y)
+        // H2: hoist floor() — was computed 4x, now 2x.
+        let fx = floor(x), fy = floor(y)
+        let xi = Int(fx) & 255
+        let yi = Int(fy) & 255
+        let xf = x - fx
+        let yf = y - fy
 
         let u = MTPerlinNoise.fade(xf)
         let v = MTPerlinNoise.fade(yf)
 
-        // Hash the four lattice corners.
-        let aa = perm[perm[xi] + yi]
-        let ab = perm[perm[xi] + yi + 1]
-        let ba = perm[perm[xi + 1] + yi]
-        let bb = perm[perm[xi + 1] + yi + 1]
+        // H1: unchecked perm access via UnsafeBufferPointer.
+        // Indices are always in-bounds (xi, yi in 0...255, perm has 512 entries).
+        return perm.withUnsafeBufferPointer { permBuf in
+            // Hash the four lattice corners.
+            let aa = permBuf[permBuf[xi] + yi]
+            let ab = permBuf[permBuf[xi] + yi + 1]
+            let ba = permBuf[permBuf[xi + 1] + yi]
+            let bb = permBuf[permBuf[xi + 1] + yi + 1]
 
-        let x1 = MTPerlinNoise.lerp(
-            MTPerlinNoise.grad(aa, xf, yf),
-            MTPerlinNoise.grad(ba, xf - 1, yf), u)
-        let x2 = MTPerlinNoise.lerp(
-            MTPerlinNoise.grad(ab, xf, yf - 1),
-            MTPerlinNoise.grad(bb, xf - 1, yf - 1), u)
-        return MTPerlinNoise.lerp(x1, x2, v)
+            let x1 = MTPerlinNoise.lerp(
+                MTPerlinNoise.grad(aa, xf, yf),
+                MTPerlinNoise.grad(ba, xf - 1, yf), u)
+            let x2 = MTPerlinNoise.lerp(
+                MTPerlinNoise.grad(ab, xf, yf - 1),
+                MTPerlinNoise.grad(bb, xf - 1, yf - 1), u)
+            return MTPerlinNoise.lerp(x1, x2, v)
+        }
     }
 
     // MARK: - Helpers

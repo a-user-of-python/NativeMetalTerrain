@@ -1091,10 +1091,9 @@ public final class MTTerrainRenderer {
             // Drop stale builds: config changed while we were generating.
             if generation == self.buildGeneration {
                 // AABB for frustum culling: chunk XZ extent, Y from min/max height.
-                let minH = chunk.heights.min() ?? 0
-                let maxH = chunk.heights.max() ?? 1
-                let y0 = self.world.worldY(forHeight: minH)
-                let y1 = self.world.worldY(forHeight: maxH)
+                // M3: min/max computed during generation (no extra passes).
+                let y0 = self.world.worldY(forHeight: chunk.minHeight)
+                let y1 = self.world.worldY(forHeight: chunk.maxHeight)
                 let x0 = Float(coord.x) * size
                 let z0 = Float(coord.z) * size
                 self.chunkCache[coord] = ChunkMesh(

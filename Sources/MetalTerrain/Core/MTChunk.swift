@@ -25,11 +25,17 @@ public struct MTChunk {
     public var coord: MTChunkCoord
     public var heights: [Float]  // resolution*resolution, normalized 0...1
     public var resolution: Int
+    /// Min/max height, computed during generation (M3: avoids two extra passes).
+    public var minHeight: Float
+    public var maxHeight: Float
 
-    public init(coord: MTChunkCoord, heights: [Float], resolution: Int) {
+    public init(coord: MTChunkCoord, heights: [Float], resolution: Int,
+                minHeight: Float = 0, maxHeight: Float = 1) {
         self.coord = coord
         self.heights = heights
         self.resolution = resolution
+        self.minHeight = minHeight
+        self.maxHeight = maxHeight
     }
 
     /// Height at grid vertex (ix, iz); indices are clamped to the grid.

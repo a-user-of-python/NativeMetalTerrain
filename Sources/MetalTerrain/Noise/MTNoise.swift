@@ -8,6 +8,22 @@
 
 import Foundation
 
+/// Lookup table for pow(x, 0.72) on [0, 1]. M4: pow() is ~75 cycles;
+/// a 256-entry LUT is 1 array access. Used for mountain peak rounding.
+private let pow072LUT: [Float] = {
+    (0..<256).map { i in
+        let x = Float(i) / 255.0
+        return Float(pow(Double(x), 0.72))
+    }
+}()
+
+@inline(__always)
+private func fastPow072(_ x: Float) -> Float {
+    let clamped = min(max(x, 0), 1)
+    let idx = Int(clamped * 255.0)
+    return pow072LUT[idx]
+}
+
 // MARK: - Noise configuration
 
 /// All tunables for the terrain noise field. Matches DESIGN.md exactly.
@@ -90,11 +106,18 @@ func mtClampedOctaves(_ config: MTNoiseConfig) -> Int {
 /// normalized by total amplitude (roughly [-1, 1]).
 func mtFBMSum(config: MTNoiseConfig, nx: Double, ny: Double,
               noise: MTPerlinNoise) -> Double {
+    mtFBMSumOctaves(config: config, octaves: mtClampedOctaves(config),
+                    nx: nx, ny: ny, noise: noise)
+}
+
+/// FBM sum with precomputed octave count (M7: avoids per-call clamp).
+func mtFBMSumOctaves(config: MTNoiseConfig, octaves: Int, nx: Double, ny: Double,
+                     noise: MTPerlinNoise) -> Double {
     var sum = 0.0
     var amp = config.amplitude
     var freq = 1.0
     var norm = 0.0
-    for _ in 0..<mtClampedOctaves(config) {
+    for _ in 0..<octaves {
         sum += amp * noise.noise(x: nx * freq, y: ny * freq)
         norm += amp
         amp *= config.gain
@@ -107,11 +130,18 @@ func mtFBMSum(config: MTNoiseConfig, nx: Double, ny: Double,
 /// normalized by total amplitude ([0, 1]).
 func mtRidgedSum(config: MTNoiseConfig, nx: Double, ny: Double,
                  noise: MTPerlinNoise) -> Double {
+    mtRidgedSumOctaves(config: config, octaves: mtClampedOctaves(config),
+                       nx: nx, ny: ny, noise: noise)
+}
+
+/// Ridged sum with precomputed octave count (M7).
+func mtRidgedSumOctaves(config: MTNoiseConfig, octaves: Int, nx: Double, ny: Double,
+                        noise: MTPerlinNoise) -> Double {
     var sum = 0.0
     var amp = config.amplitude
     var freq = 1.0
     var norm = 0.0
-    for _ in 0..<mtClampedOctaves(config) {
+    for _ in 0..<octaves {
         let n = noise.noise(x: nx * freq, y: ny * freq)
         let r = 1.0 - abs(n)
         sum += amp * r * r
@@ -132,86 +162,135 @@ func mtFBM01(config: MTNoiseConfig, x: Double, y: Double,
     return min(max(0.5 + 0.5 * v, 0.0), 1.0)
 }
 
+/// Prebuilt noise configs for the height pipeline. Built once per chunk
+/// (or per config change) to avoid 4 struct copies per vertex (M1).
+/// The configs are derived from the base config with modified octaves/flags.
+struct MTHeightFieldConfig {
+    let base: MTNoiseConfig
+    let continent: MTNoiseConfig
+    let warp: MTNoiseConfig
+    let range: MTNoiseConfig
+    let river: MTNoiseConfig
+    let continentFreq: Double
+    let mtnFreq: Double
+    let riverFreq: Double
+    let doWarp: Bool
+    let warpScale: Double
+    // M7: precomputed clamped octaves (avoids max/min per sum-call).
+    let baseOctaves: Int
+    let continentOctaves: Int
+    let warpOctaves: Int
+    let rangeOctaves: Int
+    let riverOctaves: Int
+
+    init(base: MTNoiseConfig) {
+        self.base = base
+        var continent = base
+        continent.octaves = 2
+        continent.warpStrength = 0
+        self.continent = continent
+        var warp = base
+        warp.octaves = 3
+        warp.amplitude = 1.0
+        warp.ridged = false
+        self.warp = warp
+        var range = base
+        range.octaves = 6
+        range.ridged = true
+        self.range = range
+        var river = base
+        river.octaves = 3
+        river.warpStrength = 0
+        self.river = river
+        self.continentFreq = base.baseFrequency * 0.18
+        self.mtnFreq = base.baseFrequency * 0.35
+        self.riverFreq = base.baseFrequency * 0.22
+        self.doWarp = base.warpStrength > 0
+        self.warpScale = base.baseFrequency != 0
+            ? base.warpFrequency / base.baseFrequency : 1.0
+        self.baseOctaves = mtClampedOctaves(base)
+        self.continentOctaves = mtClampedOctaves(continent)
+        self.warpOctaves = mtClampedOctaves(warp)
+        self.rangeOctaves = mtClampedOctaves(range)
+        self.riverOctaves = mtClampedOctaves(river)
+    }
+}
+
 /// Full height pipeline with pre-built noise fields (fast path for
 /// chunk generation: build the tables once, sample many points).
+/// NOTE: For performance, use mtHeightSampleField with a prebuilt
+/// MTHeightFieldConfig in hot loops (generateChunk). This wrapper is for
+/// single samples.
 func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
                     noise: MTPerlinNoise, warpNoise: MTPerlinNoise) -> Float {
+    let field = MTHeightFieldConfig(base: config)
+    return mtHeightSampleField(x: x, y: y, field: field, noise: noise, warpNoise: warpNoise)
+}
+
+/// Height pipeline using a prebuilt MTHeightFieldConfig (no per-vertex copies).
+func mtHeightSampleField(x: Double, y: Double, field: MTHeightFieldConfig,
+                         noise: MTPerlinNoise, warpNoise: MTPerlinNoise) -> Float {
+    let config = field.base
     // ── Continent layer (very low frequency): large landmasses vs oceans ──
     // 2 octaves is visually indistinguishable from 3 for these smooth masks,
     // saves ~6 noise evals per vertex (~19%).
-    var continentConfig = config
-    continentConfig.octaves = 2
-    continentConfig.warpStrength = 0
-    let continentFreq = config.baseFrequency * 0.18
-    let continent = mtFBMSum(config: continentConfig,
-                             nx: x * continentFreq, ny: y * continentFreq,
-                             noise: noise)
+    // M7: use precomputed octaves.
+    let continent = mtFBMSumOctaves(config: field.continent, octaves: field.continentOctaves,
+                                    nx: x * field.continentFreq, ny: y * field.continentFreq,
+                                    noise: noise)
 
     // ── Base detail (current behavior) ──
     var nx = x * config.baseFrequency
     var ny = y * config.baseFrequency
 
-    if config.warpStrength > 0 {
-        var warpConfig = config
-        warpConfig.octaves = 3
-        warpConfig.amplitude = 1.0
-        warpConfig.ridged = false
-        let wScale = config.baseFrequency != 0
-            ? config.warpFrequency / config.baseFrequency : 1.0
-        let wx = mtFBMSum(config: warpConfig,
-                          nx: nx * wScale + 5.2, ny: ny * wScale + 1.3,
-                          noise: warpNoise)
-        let wy = mtFBMSum(config: warpConfig,
-                          nx: nx * wScale - 1.7, ny: ny * wScale + 9.2,
-                          noise: warpNoise)
+    if field.doWarp {
+        let wx = mtFBMSumOctaves(config: field.warp, octaves: field.warpOctaves,
+                                 nx: nx * field.warpScale + 5.2, ny: ny * field.warpScale + 1.3,
+                                 noise: warpNoise)
+        let wy = mtFBMSumOctaves(config: field.warp, octaves: field.warpOctaves,
+                                 nx: nx * field.warpScale - 1.7, ny: ny * field.warpScale + 9.2,
+                                 noise: warpNoise)
         nx += config.warpStrength * wx
         ny += config.warpStrength * wy
     }
 
     let detail: Double
     if config.ridged {
-        detail = mtRidgedSum(config: config, nx: nx, ny: ny, noise: noise)
+        detail = mtRidgedSumOctaves(config: config, octaves: field.baseOctaves, nx: nx, ny: ny, noise: noise)
     } else {
-        detail = mtFBMSum(config: config, nx: nx, ny: ny, noise: noise)
+        detail = mtFBMSumOctaves(config: config, octaves: field.baseOctaves, nx: nx, ny: ny, noise: noise)
     }
 
     // ── Mountain ranges: ridged noise, masked to range bands ──
     // Low frequency = wide ranges spanning multiple chunks.
     // Only ~35% of land gets mountains; the rest stays as plains/hills.
     // 6 octaves + peak rounding for smooth (not pointy) summits.
-    var rangeConfig = config
-    rangeConfig.octaves = 6
-    rangeConfig.ridged = true
-    let rangeMask = mtFBMSum(config: continentConfig,
-                             nx: (x + 1000) * continentFreq,
-                             ny: (y - 1000) * continentFreq, noise: warpNoise)
+    let rangeMask = mtFBMSumOctaves(config: field.continent, octaves: field.continentOctaves,
+                                    nx: (x + 1000) * field.continentFreq,
+                                    ny: (y - 1000) * field.continentFreq, noise: warpNoise)
     let mountainMask = max(0, min(1, (rangeMask - 0.08) * 2.2))  // 0..1
     // Mountain shape at 0.35x frequency: ranges 3x wider, spanning chunks.
-    let mtnFreq = config.baseFrequency * 0.35
-    let ridged = mtRidgedSum(config: rangeConfig,
-                             nx: x * mtnFreq, ny: y * mtnFreq,
-                             noise: noise)
+    let ridged = mtRidgedSumOctaves(config: field.range, octaves: field.rangeOctaves,
+                                    nx: x * field.mtnFreq, ny: y * field.mtnFreq,
+                                    noise: noise)
     // Round the peaks: pow <1 softens the sharp ridged cusps.
-    let rounded = pow(max(0, ridged), 0.72)
+    // M4: use LUT instead of pow() (~75 cycles -> 1 array access).
+    let rounded = fastPow072(Float(max(0, ridged)))
     let mountains = rounded * mountainMask * mountainMask
 
     // ── Rivers: wide carved valleys along low-frequency meanders ──
     // Lower frequency = longer, more continuous rivers that reach the ocean.
-    var riverConfig = config
-    riverConfig.octaves = 3
-    riverConfig.warpStrength = 0
-    let riverFreq = config.baseFrequency * 0.22
     // Domain-warp the river path so it meanders naturally.
-    let riverWarpX = mtFBMSum(config: continentConfig,
-                              nx: (x + 5000) * continentFreq,
-                              ny: (y + 5000) * continentFreq, noise: warpNoise)
-    let riverWarpY = mtFBMSum(config: continentConfig,
-                              nx: (x - 5000) * continentFreq,
-                              ny: (y - 5000) * continentFreq, noise: noise)
-    let riverN = mtFBMSum(config: riverConfig,
-                          nx: ((x + riverWarpX * 800) + 5000) * riverFreq,
-                          ny: ((y + riverWarpY * 800) + 5000) * riverFreq,
-                          noise: noise)
+    let riverWarpX = mtFBMSumOctaves(config: field.continent, octaves: field.continentOctaves,
+                                     nx: (x + 5000) * field.continentFreq,
+                                     ny: (y + 5000) * field.continentFreq, noise: warpNoise)
+    let riverWarpY = mtFBMSumOctaves(config: field.continent, octaves: field.continentOctaves,
+                                     nx: (x - 5000) * field.continentFreq,
+                                     ny: (y - 5000) * field.continentFreq, noise: noise)
+    let riverN = mtFBMSumOctaves(config: field.river, octaves: field.riverOctaves,
+                                 nx: ((x + riverWarpX * 800) + 5000) * field.riverFreq,
+                                 ny: ((y + riverWarpY * 800) + 5000) * field.riverFreq,
+                                 noise: noise)
     let riverDist = abs(riverN)
     // Wide smooth valley (not a thin line that breaks).
     let riverCarve = max(0, 1 - riverDist * 6)

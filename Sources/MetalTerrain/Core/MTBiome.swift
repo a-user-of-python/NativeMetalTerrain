@@ -12,16 +12,31 @@ public struct MTBiome {
     public var groundColor: SIMD3<Float>  // linear RGB 0...1
     public var slopeColor: SIMD3<Float>?  // steep-slope override (cliffs)
     public var emitsLight: Bool           // e.g. lava biome
+    /// Material ID for per-material specular (M2: avoids per-vertex string switch).
+    /// 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water.
+    public var materialID: Float
 
     public init(name: String, minHeight: Float, maxHeight: Float,
                 groundColor: SIMD3<Float>, slopeColor: SIMD3<Float>? = nil,
-                emitsLight: Bool = false) {
+                emitsLight: Bool = false, materialID: Float? = nil) {
         self.name = name
         self.minHeight = minHeight
         self.maxHeight = maxHeight
         self.groundColor = groundColor
         self.slopeColor = slopeColor
         self.emitsLight = emitsLight
+        // Default material ID from name (avoids per-vertex string comparison).
+        if let mid = materialID {
+            self.materialID = mid
+        } else {
+            switch name {
+            case "deepOcean", "ocean": self.materialID = 5
+            case "beach": self.materialID = 2
+            case "mountain": self.materialID = 1
+            case "snowyPeak": self.materialID = 3
+            default: self.materialID = 0
+            }
+        }
     }
 }
 

@@ -30,6 +30,14 @@ struct ContentView: View {
     @State private var carActive = false
     /// Simulator mode: auto-enabled in Xcode Simulator, toggleable in Debug.
     @State private var simulatorMode = MTTerrainConfig.isSimulator
+    /// v1.0.0: command UI mode. When false, shows command bar. When true
+    /// (via /devtools), shows the classic button panels.
+    @State private var devtoolsMode = false
+    /// Command bar state.
+    @State private var commandExpanded = false
+    @State private var commandText = ""
+    @State private var outputMessage: String? = nil
+    @State private var outputIsError = false
 
     var body: some View {
         GeometryReader { geo in
@@ -67,6 +75,30 @@ struct ContentView: View {
                     if let r = terrainRenderer { fps = r.currentFPS }
                 }
 
+                // v1.0.0: command bar mode (default). Devtools mode shows classic UI.
+                if !devtoolsMode {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            CommandBar(
+                                isExpanded: $commandExpanded,
+                                commandText: $commandText,
+                                outputMessage: $outputMessage,
+                                outputIsError: $outputIsError,
+                                onSubmit: { cmd in executeCommand(cmd) },
+                                onSelectCommand: { cmd in
+                                    // Put command name in bar with trailing space
+                                    commandText = cmd.name + " "
+                                }
+                            )
+                        }
+                        .padding()
+                    }
+                }
+
+                // Classic UI (devtools mode via /devtools command)
+                if devtoolsMode {
                 // Show/hide button (top-right, always reachable)
                 VStack {
                     HStack {
@@ -119,9 +151,9 @@ struct ContentView: View {
                     }
                     Spacer()
                 }
+                } // end devtoolsMode
 
-                // Joystick (bottom-left): walk mode moves the player,
-                // orbit mode moves the camera target, car mode drives.
+                // Joystick (bottom-left): always visible
                 VStack {
                     Spacer()
                     HStack {
@@ -132,6 +164,62 @@ struct ContentView: View {
                             Spacer()
                         }
                 }
+            }
+        }
+    }
+
+    /// Execute a command string. Shows output briefly.
+    private func executeCommand(_ input: String) {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        // Special: /devtools toggles the classic UI
+        if trimmed.lowercased() == "/devtools" {
+            devtoolsMode.toggle()
+            showOutput(devtoolsMode ? "devtools enabled" : "devtools disabled", isError: false)
+            commandText = ""
+            commandExpanded = false
+            return
+        }
+
+        // Parse: first word is command name, rest are args
+        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+        guard let cmdName = parts.first else { return }
+        let args = parts.dropFirst().map(String.init)
+
+        guard let cmd = CommandRegistry.find(String(cmdName)) else {
+            showOutput("syntax error: unknown command '\(cmdName)'", isError: true)
+            return
+        }
+
+        let ctx = CommandContext(
+            getWorld: { [weak self] in self?.terrainRenderer?.world },
+            getRenderer: { [weak self] in self?.terrainRenderer },
+            onWorldRebuild: { [weak self] in
+                // Bump rebuild token to force world regeneration
+                self?.rebuildToken += 1
+            }
+        )
+
+        let result = cmd.handler(args, ctx)
+        switch result {
+        case .success(let msg):
+            showOutput(msg, isError: false)
+        case .error(let msg):
+            showOutput(msg, isError: true)
+        }
+        commandText = ""
+    }
+
+    /// Show output message briefly (auto-dismiss after 2 seconds).
+    private func showOutput(_ msg: String, isError: Bool) {
+        outputMessage = msg
+        outputIsError = isError
+        // Auto-dismiss after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            // Only clear if it's still the same message (avoid race)
+            if self?.outputMessage == msg {
+                self?.outputMessage = nil
             }
         }
     }

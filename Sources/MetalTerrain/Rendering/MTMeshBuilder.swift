@@ -173,6 +173,11 @@ public enum MTMeshBuilder {
         // and groundColor calls it up to 3x per vertex (190K allocs/chunk).
         let biomes = world.allBiomes
         let heightScale = cfg.heightScale
+        // H3: hoist noise pair for lock-free border normal sampling.
+        // world.heightAt() takes 2 locks per call; we do ~1000 border
+        // samples per chunk. Using mtHeightSampleField directly avoids all locks.
+        let (meshNoise, meshWarpNoise) = world.noisePair()
+        let meshField = MTHeightFieldConfig(base: cfg.noise)
 
         func h(_ i: Int, _ j: Int) -> Float { chunk.heights[j * res + i] }
 
@@ -186,28 +191,29 @@ public enum MTMeshBuilder {
                 let height = h(i, j)
 
                 // Central differences of the heightfield -> world-space normal.
-                // At chunk borders, sample the true neighbor height via the
-                // world height function (not clamped) so adjacent chunks
-                // compute identical normals — fixes visible lighting seams.
+                // At chunk borders, sample the true neighbor height via
+                // mtHeightSample (not clamped) so adjacent chunks compute
+                // identical normals — fixes visible lighting seams.
+                // Uses hoisted noise pair (no locks) instead of world.heightAt.
                 let wx = originX + Float(i) / Float(res - 1) * worldSize
                 let wz = originZ + Float(j) / Float(res - 1) * worldSize
                 let hL: Float, hR: Float, hD: Float, hU: Float
                 if i == 0 {
-                    hL = world.heightAt(x: Double(wx - cell), z: Double(wz))
+                    hL = mtHeightSampleField(x: Double(wx - cell), y: Double(wz), field: meshField, noise: meshNoise, warpNoise: meshWarpNoise)
                     hR = h(i + 1, j)
                 } else if i == res - 1 {
                     hL = h(i - 1, j)
-                    hR = world.heightAt(x: Double(wx + cell), z: Double(wz))
+                    hR = mtHeightSampleField(x: Double(wx + cell), y: Double(wz), field: meshField, noise: meshNoise, warpNoise: meshWarpNoise)
                 } else {
                     hL = h(i - 1, j)
                     hR = h(i + 1, j)
                 }
                 if j == 0 {
-                    hD = world.heightAt(x: Double(wx), z: Double(wz - cell))
+                    hD = mtHeightSampleField(x: Double(wx), y: Double(wz - cell), field: meshField, noise: meshNoise, warpNoise: meshWarpNoise)
                     hU = h(i, j + 1)
                 } else if j == res - 1 {
                     hD = h(i, j - 1)
-                    hU = world.heightAt(x: Double(wx), z: Double(wz + cell))
+                    hU = mtHeightSampleField(x: Double(wx), y: Double(wz + cell), field: meshField, noise: meshNoise, warpNoise: meshWarpNoise)
                 } else {
                     hD = h(i, j - 1)
                     hU = h(i, j + 1)
@@ -251,24 +257,28 @@ public enum MTMeshBuilder {
         let skirtDepth = world.config.heightScale * 0.35 + 10
         let base = UInt32(vertices.count)
         // Collect edge vertices in order: bottom, right, top, left.
+        // L2: track edge index for axis-aligned normals (no sqrt needed).
         var edge: [UInt32] = []
+        var edgeNormal: [SIMD3<Float>] = []
         edge.reserveCapacity(4 * n)
-        for a in 0..<n { edge.append(UInt32(a)) }                    // j = 0
-        for b in 1..<n { edge.append(UInt32(b * n + (n - 1))) }      // i = n-1
-        for a in stride(from: n - 2, through: 0, by: -1) { edge.append(UInt32((n - 1) * n + a)) } // j = n-1
-        for b in stride(from: n - 2, through: 1, by: -1) { edge.append(UInt32(b * n)) }          // i = 0
+        edgeNormal.reserveCapacity(4 * n)
+        let bottomN = SIMD3<Float>(0, 0, -1)
+        let rightN = SIMD3<Float>(1, 0, 0)
+        let topN = SIMD3<Float>(0, 0, 1)
+        let leftN = SIMD3<Float>(-1, 0, 0)
+        for a in 0..<n { edge.append(UInt32(a)); edgeNormal.append(bottomN) }                    // j = 0
+        for b in 1..<n { edge.append(UInt32(b * n + (n - 1))); edgeNormal.append(rightN) }      // i = n-1
+        for a in stride(from: n - 2, through: 0, by: -1) { edge.append(UInt32((n - 1) * n + a)); edgeNormal.append(topN) } // j = n-1
+        for b in stride(from: n - 2, through: 1, by: -1) { edge.append(UInt32(b * n)); edgeNormal.append(leftN) }          // i = 0
 
         for (k, vi) in edge.enumerated() {
             let v = vertices[Int(vi)]
             let px = v.position.x, pz = v.position.z
-            // Outward normal: horizontal, pointing away from chunk center.
-            let cx = originX + worldSize / 2, cz = originZ + worldSize / 2
-            var nx = px - cx, nz = pz - cz
-            let len = max(0.001, sqrt(nx * nx + nz * nz))
-            nx /= len; nz /= len
+            // L2: axis-aligned outward normal (no sqrt).
+            let nrm = edgeNormal[k]
             vertices.append(MTVertex(
                 position: SIMD3<Float>(px, v.position.y - skirtDepth, pz),
-                normal: SIMD3<Float>(nx, 0, nz),
+                normal: nrm,
                 color: SIMD3<Float>(v.color.x * 0.55, v.color.y * 0.55, v.color.z * 0.55)
             ))
             let si = base + UInt32(k)
@@ -321,14 +331,9 @@ public enum MTMeshBuilder {
         let biome = biomeAt(height: h, in: biomes)
         // Material ID for per-material specular: 0=grass, 1=rock, 2=sand,
         // 3=snow, 4=deep snow, 5=water.
-        let material: Float
-        switch biome.name {
-        case "deepOcean", "ocean": material = 5
-        case "beach": material = 2
-        case "mountain": material = 1
-        case "snowyPeak": material = h > 0.92 ? 4 : 3
-        default: material = 0  // grass, forest
-        }
+        // M2: uses precomputed biome.materialID (no per-vertex string switch).
+        // Note: snowyPeak uses 3, but h > 0.92 upgrades to 4 (deep snow) below.
+        let material: Float = biome.materialID == 3 && h > 0.92 ? 4 : biome.materialID
         let slope = 1.0 - normalY
         // On mountains (high altitude), force rock to prevent grass/forest
         // banding from height oscillation. Wide threshold (0.65) ensures
