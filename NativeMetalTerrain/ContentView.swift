@@ -211,10 +211,16 @@ struct ContentView: View {
         switch result {
         case .success(let msg):
             showOutput(msg, isError: false)
-            // If the command changed the world, bump rebuild token
-            // (commands that set world.config already trigger via configVersion,
-            // but seed changes need explicit rebuild)
-            if cmd.name == "seed" {
+            // Commands that modify world terrain/noise config need a full
+            // world rebuild to take effect. Renderer-only commands (colors,
+            // wireframe, sun, etc.) apply immediately without rebuild.
+            let worldModifying: Set<String> = [
+                "seed", "chunksize", "chunkresolution", "sealevel",
+                "heightscale", "mountainmax", "octaves", "frequency",
+                "amplitude", "lacunarity", "gain", "warpstrength",
+                "warpfrequency", "ridged", "structures", "structuredensity"
+            ]
+            if worldModifying.contains(cmd.name) {
                 rebuildToken += 1
             }
         case .error(let msg):
