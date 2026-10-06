@@ -56,11 +56,25 @@ struct MainMenu: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
             .navigationDestination(isPresented: $showWorlds) {
-                WorldsView(onSelect: { preset in
-                    lastPresetRaw = preset.rawValue
-                    activePreset = preset
-                    showGame = true
-                })
+                WorldsView(
+                    onSelect: { preset in
+                        lastPresetRaw = preset.rawValue
+                        activePreset = preset
+                        showGame = true
+                    },
+                    onLoadSaved: { saved in
+                        // Load saved world: store it for ContentView to pick up
+                        UserDefaults.standard.set(saved.presetRaw, forKey: "pendingPreset")
+                        UserDefaults.standard.set(saved.seed, forKey: "pendingSeed")
+                        // Encode the saved config values
+                        if let data = try? JSONEncoder().encode(saved) {
+                            UserDefaults.standard.set(data, forKey: "pendingSavedWorld")
+                        }
+                        lastPresetRaw = saved.presetRaw
+                        activePreset = saved.preset
+                        showGame = true
+                    }
+                )
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsView()
