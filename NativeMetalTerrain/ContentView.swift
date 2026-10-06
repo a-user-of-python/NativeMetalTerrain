@@ -189,6 +189,19 @@ struct ContentView: View {
             return
         }
 
+        // Special: reset restores factory defaults (seed 1337, default config)
+        if trimmed.lowercased() == "reset" {
+            commandConfig = nil
+            seed = 1337
+            seedText = "1337"
+            preset = .default
+            rebuildToken += 1
+            showOutput("reset to defaults", isError: false)
+            commandText = ""
+            commandExpanded = false
+            return
+        }
+
         // Parse: first word is command name, rest are args
         let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
         guard let cmdName = parts.first else { return }

@@ -555,6 +555,17 @@ struct CommandRegistry {
                 // The actual toggle is done via the onDevtools callback.
                 return .success("devtools toggled")
             },
+
+            // MARK: - Reset
+            TerrainCommand(
+                name: "reset",
+                description: "Reset all settings to factory defaults (seed 1337, default config)",
+                usage: "reset"
+            ) { args, ctx in
+                // Handled specially by ContentView; this is a placeholder.
+                // ContentView clears commandConfig, resets seed, and rebuilds.
+                return .success("reset to defaults")
+            },
         ]
     }
 
