@@ -724,7 +724,7 @@ public final class MTTerrainRenderer {
                     encoder.setDepthStencilState(waterDepthState)
                     bindUniforms(encoder, slot: terrainSlot)
                     encoder.setVertexBuffer(ib, offset: 0, index: 0)
-                    encoder.drawPrimitives(type: .triangleStrip,
+                    encoder.drawPrimitives(type: .triangle,
                                            vertexStart: 0, vertexCount: 4,
                                            instanceCount: instances.count)
                     // Restore state for water.
@@ -1317,7 +1317,7 @@ public final class MTTerrainRenderer {
         let d = MTL4RenderPipelineDescriptor()
         d.vertexFunctionDescriptor = vDesc
         d.fragmentFunctionDescriptor = fDesc
-        d.inputPrimitiveTopology = .triangleStrip
+        d.inputPrimitiveTopology = .triangle
         guard let color = d.colorAttachments[0] else {
             preconditionFailure("MTTerrainRenderer: Metal 4 color attachment 0 missing")
         }
