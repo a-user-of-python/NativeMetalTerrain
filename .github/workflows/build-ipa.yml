@@ -60,6 +60,13 @@ jobs:
       # ── Standard build (all devices) ──
       - name: Build standard (no signing)
         run: |
+          # v1.2.1: explicitly resolve the local Swift package (Xcode 26+
+          # resolves XCLocalSwiftPackageReference relative to CWD, not the
+          # .xcodeproj, so we resolve from the repo root where Package.swift lives).
+          xcodebuild -resolvePackageDependencies \
+            -project NativeMetalTerrain.xcodeproj \
+            -scheme NativeMetalTerrain \
+            -packagePath .
           xcodebuild build \
             -project NativeMetalTerrain.xcodeproj \
             -scheme NativeMetalTerrain \
