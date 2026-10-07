@@ -336,6 +336,65 @@ fragment float4 structure_fragment(MTVaryings in [[stage_in]],
     return float4(col, 1.0);
 }
 
+// v1.3.0: volcano lava billboards. Procedural quad (vertex_id corners),
+// one instance per lava blob/deposit. Additive blending, emissive —
+// visible day and night, no lighting needed.
+struct MTLavaInstance {
+    float4 posSize;   // xyz = world center, w = half-size (world units)
+    float4 kindHeat;  // x = 0 blob / 1 deposit, y = heat 0..1
+};
+
+struct MTLavaVaryings {
+    float4 clipPos [[position]];
+    float2 uv;     // -1..1 quad coords
+    float  heat;
+    float  kind;
+};
+
+vertex MTLavaVaryings lava_vertex(const device MTLavaInstance *instances [[buffer(0)]],
+                                  constant MTUniforms &uniforms [[buffer(1)]],
+                                  uint vid [[vertex_id]],
+                                  uint iid [[instance_id]]) {
+    MTLavaInstance inst = instances[iid];
+    float3 center = inst.posSize.xyz;
+    float size = inst.posSize.w;
+    // Quad corners for a triangle strip: (-1,-1), (1,-1), (-1,1), (1,1).
+    float2 corner = float2((vid & 1u) ? 1.0 : -1.0,
+                           (vid & 2u) ? 1.0 : -1.0);
+    float3 world;
+    if (inst.kindHeat.x > 0.5) {
+        // Deposit: flat disc lying on the terrain (XZ plane).
+        world = center + float3(corner.x, 0.0, corner.y) * size;
+    } else {
+        // Blob: camera-facing billboard.
+        float3 look = normalize(uniforms.cameraPos.xyz - center + float3(0.0, 0.001, 0.0));
+        float3 right = normalize(cross(float3(0.0, 1.0, 0.0), look));
+        float3 up = cross(look, right);
+        world = center + (right * corner.x + up * corner.y) * size;
+    }
+    MTLavaVaryings out;
+    out.clipPos = uniforms.viewProj * float4(world, 1.0);
+    out.uv = corner;
+    out.heat = inst.kindHeat.y;
+    out.kind = inst.kindHeat.x;
+    return out;
+}
+
+fragment float4 lava_fragment(MTLavaVaryings in [[stage_in]]) {
+    float r = length(in.uv);  // 0 at center → ~1.41 at corners
+    float falloff = clamp(1.0 - r, 0.0, 1.0);
+    falloff *= falloff;
+    // Hot yellow-white core → orange → deep red edge.
+    float3 hot  = float3(1.0, 0.85, 0.30);
+    float3 mid  = float3(1.0, 0.35, 0.05);
+    float3 cool = float3(0.45, 0.05, 0.01);
+    float3 col = mix(cool, mix(mid, hot, falloff), falloff);
+    // Emissive boost so lava glows at night (additive blending).
+    col *= (1.2 + 2.4 * in.heat);
+    float alpha = falloff * (0.30 + 0.70 * in.heat);
+    return float4(col * alpha, alpha);
+}
+
 #ifdef M3_FEATURES
 // ---- Hardware ray-traced sun shadows (M3+/A17 Pro+) ----
 // Bind the TLAS with `encoder.setFragmentAccelerationStructure(tlas, at: 3)`.
@@ -383,3 +442,67 @@ fragment float4 terrain_fragment_rt(MTVaryings in [[stage_in]],
     return float4(col, 1.0);
 }
 #endif // M3_FEATURES
+
+// MARK: - Lava particles (v1.3.0)
+
+struct LavaVaryings {
+    float4 position [[position]];
+    float2 uv;
+    float  kind;  // 0 = blob, 1 = deposit
+};
+
+vertex LavaVaryings lava_vertex(uint vid [[vertex_id]],
+                                uint iid [[instance_id]],
+                                constant float4 *instances [[buffer(0)]],
+                                constant float4x4 &vp [[buffer(1)]]) {
+    // instances: xyz = center, w = radius (blob) or radius (deposit)
+    // kind encoded in sign of w: positive = blob, negative = deposit
+    float4 inst = instances[iid];
+    float3 center = inst.xyz;
+    float radius = abs(inst.w);
+    float kind = inst.w >= 0 ? 0.0 : 1.0;
+
+    // Quad corners
+    float2 quad[4] = { float2(-1,-1), float2(1,-1), float2(-1,1), float2(1,1) };
+    float2 corner = quad[vid];
+
+    float3 worldPos;
+    if (kind < 0.5) {
+        // Blob: camera-facing billboard
+        float3 right = float3(vp[0][0], vp[1][0], vp[2][0]);
+        float3 up = float3(vp[0][1], vp[1][1], vp[2][1]);
+        worldPos = center + (right * corner.x + up * corner.y) * radius;
+    } else {
+        // Deposit: flat disc on ground
+        worldPos = center + float3(corner.x * radius, 0.1, corner.y * radius);
+    }
+
+    LavaVaryings out;
+    out.position = vp * float4(worldPos, 1.0);
+    out.uv = corner;
+    out.kind = kind;
+    return out;
+}
+
+fragment float4 lava_fragment(LavaVaryings in [[stage_in]]) {
+    float d = length(in.uv);
+    if (d > 1.0) discard_fragment();
+
+    // Hot core -> cool edge
+    float3 hot = float3(1.0, 0.95, 0.6);   // yellow-white
+    float3 mid = float3(1.0, 0.35, 0.05);  // orange
+    float3 cool = float3(0.5, 0.05, 0.0);   // deep red
+
+    float3 col;
+    if (d < 0.4) {
+        col = mix(hot, mid, d / 0.4);
+    } else {
+        col = mix(mid, cool, (d - 0.4) / 0.6);
+    }
+
+    // Emissive boost (visible at night)
+    col *= 2.5;
+
+    float alpha = 1.0 - smoothstep(0.8, 1.0, d);
+    return float4(col, alpha);
+}
