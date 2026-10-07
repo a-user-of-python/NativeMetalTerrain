@@ -329,6 +329,9 @@ public final class MTTerrainRenderer {
         waveAmplitude = world.config.waveAmplitude
         waterOpacity = world.config.waterOpacity
         buildWaterParamsBuffer()
+        // v1.2.5: GPU heightmap generation. Nil when the kernel is
+        // unavailable — the world then uses the CPU path in generateChunk.
+        world.heightmapCompute = MTHeightmapCompute(device: device)
         loadStructureMeshes()
         // Skybox works on all devices (standard Metal 3).
         self.skybox = MTSkybox(device: device)

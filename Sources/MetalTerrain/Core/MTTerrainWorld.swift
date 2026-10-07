@@ -192,6 +192,17 @@ public final class MTTerrainWorld {
 
     // MARK: - Chunks
 
+    // GPU heightmap generator, installed by the renderer (which owns the
+    // MTLDevice). Nil when the renderer never set it or the compute
+    // kernel is unavailable — generateChunk then uses the CPU path.
+    // v1.2.5: guarded by gpuLock (set on main, read on build queues).
+    private let gpuLock = NSLock()
+    private var _heightmapCompute: MTHeightmapCompute?
+    internal var heightmapCompute: MTHeightmapCompute? {
+        get { gpuLock.withLock { _heightmapCompute } }
+        set { gpuLock.withLock { _heightmapCompute = newValue } }
+    }
+
     /// Generate a chunk's heightmap. Deterministic: the same seed,
     /// config, and coord always yield the same grid.
     public func generateChunk(at coord: MTChunkCoord, resolutionScale: Float = 1) -> MTChunk {
@@ -207,6 +218,7 @@ public final class MTTerrainWorld {
 
         // Reuse the cached noise tables (built once per seed).
         let (noise, warpNoise) = noisePair()
+        let currentSeed = seed
         // Hoist config.noise out of the inner loop: `config` is a locking
         // computed property, so accessing it per-vertex = 62.5K lock acquisitions.
         // M1: build the height field config once (avoids 4 struct copies/vertex).
@@ -215,6 +227,23 @@ public final class MTTerrainWorld {
                                         continentScale: config.continentScale,
                                         riverScale: config.riverScale,
                                         mountainSharpness: config.mountainSharpness)
+
+        // v1.2.5: GPU compute path — the MSL kernel replicates the Swift
+        // noise math exactly. Any failure falls through to the CPU path.
+        if let compute = heightmapCompute,
+           let gpuHeights = compute.generateHeights(
+               x0: x0, z0: z0, step: step, res: res, field: field,
+               seed: currentSeed, noise: noise, warpNoise: warpNoise) {
+            var minH: Float = .greatestFiniteMagnitude
+            var maxH: Float = -.greatestFiniteMagnitude
+            for q in gpuHeights {
+                let h = Float(q) / 65535.0
+                if h < minH { minH = h }
+                if h > maxH { maxH = h }
+            }
+            return MTChunk(coord: coord, heights: gpuHeights, resolution: res,
+                           minHeight: minH, maxHeight: maxH)
+        }
 
         var heights = [UInt16](repeating: 0, count: res * res)
         // M3: track min/max in the fill loop (avoids two extra passes).
