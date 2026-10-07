@@ -4,6 +4,7 @@
 // per-vertex normals from central differences of the heightfield, and vertex
 // colors from biomes (with border blending and slope-based cliffs).
 
+import Foundation
 import simd
 
 // MARK: - Canonical vertex
