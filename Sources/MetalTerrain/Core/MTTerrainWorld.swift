@@ -216,7 +216,7 @@ public final class MTTerrainWorld {
                                         riverScale: config.riverScale,
                                         mountainSharpness: config.mountainSharpness)
 
-        var heights = [Float](repeating: 0, count: res * res)
+        var heights = [UInt16](repeating: 0, count: res * res)
         // M3: track min/max in the fill loop (avoids two extra passes).
         var minH: Float = .greatestFiniteMagnitude
         var maxH: Float = -.greatestFiniteMagnitude
@@ -227,7 +227,8 @@ public final class MTTerrainWorld {
                 let h = mtHeightSampleField(
                     x: wx, y: wz, field: field,
                     noise: noise, warpNoise: warpNoise)
-                heights[iz * res + ix] = h
+                // Quantize to 16-bit (6mm at 400m scale — invisible).
+                heights[iz * res + ix] = UInt16((h * 65535.0).rounded())
                 if h < minH { minH = h }
                 if h > maxH { maxH = h }
             }

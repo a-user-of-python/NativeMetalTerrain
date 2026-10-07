@@ -66,6 +66,8 @@ struct ContentView: View {
     @State private var carActive = false
     /// Simulator mode: auto-enabled in Xcode Simulator, toggleable in Debug.
     @State private var simulatorMode = MTTerrainConfig.isSimulator
+    /// v1.2.0: uncapped FPS (synced from Settings via AppStorage).
+    @AppStorage("uncappedFPS") private var uncappedFPS = false
     /// v1.0.0: command UI mode. When false, shows command bar. When true
     /// (via /devtools), shows the classic button panels.
     /// v1.0.4: command bar replaced by control shelf (sliders).
@@ -105,6 +107,7 @@ struct ContentView: View {
                     moveInput: $moveInput,
                     carActive: $carActive,
                     simulatorMode: $simulatorMode,
+                    uncappedFPS: $uncappedFPS,
                     onRendererReady: { renderer in
                         // Capture synchronously: this closure was created during
                         // the body evaluation whose rebuildToken value triggered

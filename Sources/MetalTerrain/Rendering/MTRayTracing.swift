@@ -167,7 +167,7 @@ public final class MTRayTracing {
 
     /// Builds one BLAS from a chunk's triangle soup. The geometry
     /// descriptor must match `MTVertex` exactly: position is the first
-    /// float4 (offset 0), 48-byte vertex stride, UInt32 indices.
+    /// 3 floats (offset 0), 20-byte vertex stride, UInt32 indices.
     private func buildBLAS(vertexBuffer: MTLBuffer,
                            indexBuffer: MTLBuffer,
                            indexCount: Int,
@@ -175,8 +175,8 @@ public final class MTRayTracing {
         let geo = MTLAccelerationStructureTriangleGeometryDescriptor()
         geo.vertexBuffer = vertexBuffer
         geo.vertexBufferOffset = 0
-        geo.vertexFormat = .float4
-        geo.vertexStride = MemoryLayout<MTVertex>.stride  // 48
+        geo.vertexFormat = .float3  // packed MTVertex: position is 3 floats
+        geo.vertexStride = MemoryLayout<MTVertex>.stride  // 20
         geo.indexBuffer = indexBuffer
         geo.indexBufferOffset = 0
         geo.indexType = .uint32

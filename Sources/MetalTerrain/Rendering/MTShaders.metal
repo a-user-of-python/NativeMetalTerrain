@@ -8,12 +8,44 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Must match MTVertex in MTMeshBuilder.swift (36 bytes).
+// Must match MTVertex in MTMeshBuilder.swift (20 bytes).
+// Packed: 12 bytes position + 4 bytes octahedral normal + 4 bytes RGBA8888.
+// All scalar fields — no padding on either side. Decode with the helpers
+// below; the raw fields are never read directly.
 struct MTVertexIn {
-    float4 position;  // xyz
-    float4 normal;    // xyz
-    float4 color;     // rgb
+    float px, py, pz;  // world-space position
+    uint normalXY;      // octahedral-encoded normal (2x int16 packed)
+    uint rgba;          // R,G,B 8-bit each; A = material ID (not normalized)
 };
+
+/// Decode an octahedral-encoded normal (2x int16 in a uint) to a unit float3.
+/// Matches MTVertex.decodeNormal in MTMeshBuilder.swift.
+float3 mtDecodeNormal(uint packed) {
+    // Sign-extend the 16-bit halves via arithmetic shifts. as_type is
+    // bit-preserving (unlike int(), which is implementation-defined for
+    // large uint values); the >> on signed int is arithmetic.
+    int sx = as_type<int>(packed << 16u) >> 16;
+    int sy = as_type<int>(packed) >> 16;
+    float2 e = float2(sx, sy) / 32767.0;
+    float3 n = float3(e.x, e.y, 1.0 - abs(e.x) - abs(e.y));
+    if (n.z < 0.0) {
+        float ox = n.x, oy = n.y;
+        n.x = (1.0 - abs(oy)) * (ox >= 0.0 ? 1.0 : -1.0);
+        n.y = (1.0 - abs(ox)) * (oy >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(n);
+}
+
+/// Decode RGBA8888 to float4: rgb in 0...1, a = material ID (0-5, raw).
+float4 mtDecodeColor(uint rgba) {
+    float4 c = float4(
+        float(rgba & 0xFFu),
+        float((rgba >> 8u) & 0xFFu),
+        float((rgba >> 16u) & 0xFFu),
+        float((rgba >> 24u) & 0xFFu));
+    c.rgb /= 255.0;
+    return c;
+}
 
 // Must match MTUniforms in MTTerrainRenderer.swift (208 bytes).
 // Uses float4 packing on both sides: Swift's SIMD3<Float> is 16-byte
@@ -87,9 +119,12 @@ vertex MTVaryings terrain_vertex(const device MTVertexIn *vertices [[buffer(0)]]
                                  constant MTUniforms &uniforms [[buffer(1)]],
                                  uint vid [[vertex_id]]) {
     MTVertexIn v = vertices[vid];
-    float material = v.color.a;
-    float3 worldPos = (uniforms.model * float4(v.position.xyz, 1.0)).xyz;
-    float3 nrm = normalize((uniforms.model * float4(v.normal.xyz, 0.0)).xyz);
+    float4 vcolor = mtDecodeColor(v.rgba);
+    float material = vcolor.a;
+    float3 vpos = float3(v.px, v.py, v.pz);
+    float3 vnrm = mtDecodeNormal(v.normalXY);
+    float3 worldPos = (uniforms.model * float4(vpos, 1.0)).xyz;
+    float3 nrm = normalize((uniforms.model * float4(vnrm, 0.0)).xyz);
     // Procedural detail: displace along normal by material noise.
     // misc: x=time, y=shaderFX, z=wireframe, w=detailAmount
     float detailAmt = uniforms.misc.w;
@@ -105,7 +140,7 @@ vertex MTVaryings terrain_vertex(const device MTVertexIn *vertices [[buffer(0)]]
     out.clipPos = uniforms.viewProj * world;
     out.worldPos = worldPos;
     out.normal = nrm;
-    out.color = v.color.rgb;
+    out.color = vcolor.rgb;
     out.material = material;
     return out;
 }
@@ -282,12 +317,15 @@ vertex MTVaryings structure_vertex(const device MTVertexIn *vertices [[buffer(0)
                                    uint iid [[instance_id]]) {
     MTVertexIn v = vertices[vid];
     MTInstanceData inst = instances[iid];
-    float4 world = inst.model * float4(v.position.xyz, 1.0);
+    float4 vcolor = mtDecodeColor(v.rgba);
+    float3 vpos = float3(v.px, v.py, v.pz);
+    float3 vnrm = mtDecodeNormal(v.normalXY);
+    float4 world = inst.model * float4(vpos, 1.0);
     MTVaryings out;
     out.clipPos = uniforms.viewProj * world;
     out.worldPos = world.xyz;
-    out.normal = (inst.model * float4(v.normal.xyz, 0.0)).xyz;
-    out.color = v.color.rgb * inst.tint.rgb;
+    out.normal = (inst.model * float4(vnrm, 0.0)).xyz;
+    out.color = vcolor.rgb * inst.tint.rgb;
     out.material = 1.0;  // structures are rock-like
     return out;
 }

@@ -33,8 +33,8 @@
 // separate from the vertex/fragment stages):
 //   object   buffer(0): MTMeshChunkParams (one chunk, via setObjectBytes)
 //   object   buffer(1): MTUniforms (192 bytes, same layout as MTShaders.metal)
-//   mesh     buffer(0): heightmap, `device float*` (resolution*resolution
-//                       normalized heights, row-major — MTChunk.heights layout)
+//   mesh     buffer(0): heightmap, `device ushort*` (resolution*resolution
+//                       quantized heights, row-major — MTChunk.heights layout)
 //   mesh     buffer(1): MTMeshBiome table (constant, up to 16 entries)
 //   mesh     buffer(2): biome count (uint, via setMeshBytes)
 //   fragment buffer(1): MTUniforms — intentionally the same index the
@@ -389,11 +389,13 @@ void mesh_terrain_object(object_data<MTMeshPayload> m,
 /// CPU builder uses. Vertices are a pure function of grid coordinates, so
 /// tiles need no cross-threadgroup sharing; the last strip of tiles may be
 /// partial (qw/qh < 8) and out-of-range threads simply skip.
+///
+/// Heights are UInt16 quantized (0...65535 maps to 0...1).
 [[mesh]]
 void mesh_terrain_mesh(mesh<MTMeshVertexOut, void, MTMeshPayload,
                             MT_MESH_TILE_MAX_VERTS, MT_MESH_TILE_MAX_TRIS,
                             triangle> m,
-                       const device float *heights [[buffer(0)]],
+                       const device ushort *heights [[buffer(0)]],
                        constant MTMeshBiome *biomes [[buffer(1)]],
                        constant uint &biomeCount [[buffer(2)]],
                        uint tid [[thread_index_in_threadgroup]],
@@ -422,15 +424,16 @@ void mesh_terrain_mesh(mesh<MTMeshVertexOut, void, MTMeshPayload,
             int j = (gb == n - 1) ? res - 1 : gb * step;
             i = min(i, res - 1);
             j = min(j, res - 1);
-            const float h = heights[j * res + i];
+            // UInt16 quantized height → float 0...1.
+            const float h = float(heights[j * res + i]) / 65535.0;
 
             // Central differences of the heightfield -> world-space normal.
             // One-sided at the chunk border.
             const int iL = max(i - 1, 0), iR = min(i + 1, res - 1);
             const int jD = max(j - 1, 0), jU = min(j + 1, res - 1);
-            const float dYdx = p.heightScale * (heights[j * res + iR] - heights[j * res + iL])
+            const float dYdx = p.heightScale * (float(heights[j * res + iR]) - float(heights[j * res + iL])) / 65535.0
                              / (float(iR - iL) * cell);
-            const float dYdz = p.heightScale * (heights[jU * res + i] - heights[jD * res + i])
+            const float dYdz = p.heightScale * (float(heights[jU * res + i]) - float(heights[jD * res + i])) / 65535.0
                              / (float(jU - jD) * cell);
             const float3 nrm = normalize(float3(-dYdx, 1.0f, -dYdz));
 

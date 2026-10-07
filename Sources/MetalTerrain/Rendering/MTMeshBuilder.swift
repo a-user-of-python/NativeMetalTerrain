@@ -10,38 +10,107 @@ import simd
 
 /// The one shared vertex format for every MetalTerrain mesh.
 ///
-/// - position: world-space XYZ (float3)
-/// - normal:   world-space unit normal (float3)
-/// - color:    linear RGB 0...1 (float3)
+/// Packed 20-byte layout (was 48 bytes as 3x SIMD4):
+/// - position: 3x Float, 12 bytes — world-space XYZ
+/// - normal:   UInt32, 4 bytes — octahedral-encoded unit normal (2x Int16)
+/// - color:    UInt32, 4 bytes — RGBA8888; rgb = linear color 0...1,
+///             a = material ID (0=grass, 1=rock, 2=sand, 3=snow,
+///             4=deep snow, 5=water)
 ///
-/// Layout: three consecutive float3s = 36 bytes, no padding.
+/// The color quantizes to 8 bits/channel (display precision — visually
+/// lossless) and the normal uses octahedral encoding (max error ~0.01°,
+/// visually lossless for terrain).
+///
+/// Layout: Swift lays out (Float, Float, Float, UInt32, UInt32) as
+/// 12 + 4 + 4 = 20 bytes with 4-byte alignment — no padding. This must
+/// match `MTVertexIn` in MTShaders.metal exactly (all scalar fields).
 ///
 /// NOTE (cross-module contract): the sibling Structures module defines
-/// `MTSimpleVertex { position/normal/color: SIMD3<Float> }`, which is
-/// layout-identical to `MTVertex` (same three float3 fields, same order,
-/// 36 bytes total). Structure meshes are therefore copied field-by-field in
-/// `buildStructureMeshes` below rather than reinterpreted, so this stays
-/// correct even if the sibling's type ever diverges.
-/// Vertex layout shared with MTShaders.metal. Uses SIMD4 (not SIMD3):
-/// Swift pads SIMD3<Float> to 16 bytes but Metal packs float3 as 12 bytes,
-/// so 3xSIMD3 is 48 bytes in Swift vs 36 bytes in Metal — the shader would
-/// read every vertex after the first from the wrong offset. SIMD4/float4
-/// is 16 bytes on both sides: 48 bytes total, no ambiguity.
+/// `MTSimpleVertex { position/normal/color: SIMD3<Float> }`. Structure
+/// meshes are copied field-by-field through the `MTVertex` inits below,
+/// so the packing is applied uniformly to structures, terrain, and water.
 public struct MTVertex {
-    public var position: SIMD4<Float>  // xyz = position
-    public var normal: SIMD4<Float>    // xyz = normal
-    public var color: SIMD4<Float>     // rgb = color
+    public var px: Float
+    public var py: Float
+    public var pz: Float
+    public var normalXY: UInt32  // octahedral-encoded normal, 2x Int16 packed
+    public var rgba: UInt32      // RGBA8888: rgb = color, a = material ID
 
     public init(position: SIMD3<Float>, normal: SIMD3<Float>, color: SIMD3<Float>) {
-        self.position = SIMD4<Float>(position, 0)
-        self.normal = SIMD4<Float>(normal, 0)
-        self.color = SIMD4<Float>(color, 1)
+        self.px = position.x
+        self.py = position.y
+        self.pz = position.z
+        self.normalXY = Self.encodeNormal(normal)
+        // Material defaults to 1 (rock), matching the old SIMD4(color, 1).
+        self.rgba = Self.encodeColor(color, material: 1)
     }
 
     public init(position: SIMD3<Float>, normal: SIMD3<Float>, color: SIMD4<Float>) {
-        self.position = SIMD4<Float>(position, 0)
-        self.normal = SIMD4<Float>(normal, 0)
-        self.color = color
+        self.px = position.x
+        self.py = position.y
+        self.pz = position.z
+        self.normalXY = Self.encodeNormal(normal)
+        self.rgba = Self.encodeColor(SIMD3<Float>(color.x, color.y, color.z),
+                                     material: Int(color.w.rounded()))
+    }
+
+    /// World-space position (unpacked).
+    public var position: SIMD3<Float> { SIMD3<Float>(px, py, pz) }
+
+    /// World-space unit normal (unpacked from octahedral encoding).
+    public var normal: SIMD3<Float> { Self.decodeNormal(normalXY) }
+
+    /// Linear RGB color with material ID in `w` (unpacked from RGBA8888).
+    public var color: SIMD4<Float> {
+        let r = Float(rgba & 0xFF) / 255.0
+        let g = Float((rgba >> 8) & 0xFF) / 255.0
+        let b = Float((rgba >> 16) & 0xFF) / 255.0
+        let m = Float((rgba >> 24) & 0xFF)
+        return SIMD4<Float>(r, g, b, m)
+    }
+
+    // MARK: Packing
+
+    /// Octahedral-encode a unit normal into 2x Int16 packed in a UInt32.
+    /// Projects onto the octahedron |x|+|y|+|z|=1 and unfolds the lower
+    /// hemisphere. Max angular error ~0.01° — invisible on terrain.
+    static func encodeNormal(_ n: SIMD3<Float>) -> UInt32 {
+        let l1 = abs(n.x) + abs(n.y) + abs(n.z)
+        guard l1 > 0 else { return 0 }
+        let inv = 1.0 / l1
+        var ex = n.x * inv
+        var ey = n.y * inv
+        if n.z < 0 {
+            let ox = ex, oy = ey
+            ex = (1.0 - abs(oy)) * (ox >= 0 ? 1.0 : -1.0)
+            ey = (1.0 - abs(ox)) * (oy >= 0 ? 1.0 : -1.0)
+        }
+        let ix = UInt32(bitPattern: Int32(Int16((ex * 32767.0).rounded()))) & 0xFFFF
+        let iy = UInt32(bitPattern: Int32(Int16((ey * 32767.0).rounded()))) & 0xFFFF
+        return ix | (iy << 16)
+    }
+
+    /// Decode an octahedral-encoded normal (CPU-side; the GPU uses the
+    /// matching `mtDecodeNormal` in MTShaders.metal).
+    static func decodeNormal(_ packed: UInt32) -> SIMD3<Float> {
+        let ex = Float(Int16(bitPattern: UInt16(packed & 0xFFFF))) / 32767.0
+        let ey = Float(Int16(bitPattern: UInt16((packed >> 16) & 0xFFFF))) / 32767.0
+        var n = SIMD3<Float>(ex, ey, 1.0 - abs(ex) - abs(ey))
+        if n.z < 0 {
+            let ox = n.x, oy = n.y
+            n.x = (1.0 - abs(oy)) * (ox >= 0 ? 1.0 : -1.0)
+            n.y = (1.0 - abs(ox)) * (oy >= 0 ? 1.0 : -1.0)
+        }
+        return normalize(n)
+    }
+
+    /// Pack an RGB color (0...1) and material ID into RGBA8888.
+    static func encodeColor(_ c: SIMD3<Float>, material: Int) -> UInt32 {
+        let r = UInt32(min(max((c.x * 255.0).rounded(), 0), 255))
+        let g = UInt32(min(max((c.y * 255.0).rounded(), 0), 255))
+        let b = UInt32(min(max((c.z * 255.0).rounded(), 0), 255))
+        let m = UInt32(min(max(material, 0), 255))
+        return r | (g << 8) | (b << 16) | (m << 24)
     }
 }
 
@@ -67,11 +136,12 @@ public enum MTMeshBuilder {
     ///   - world: the world; supplies world-space Y (`worldY(forHeight:)`),
     ///     biome lookup (`biomeAt(height:)`), and config (chunk size,
     ///     height scale, sea level).
-    /// - Returns: vertices and `UInt32` indices (two CCW triangles per quad).
+    /// - Returns: vertices, `UInt32` indices (two CCW triangles per quad),
+    ///   and the grid size `n` (vertices per side, for index-buffer sharing).
     public static func buildTerrainMesh(
         chunk: MTChunk,
         world: MTTerrainWorld
-    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+    ) -> (vertices: [MTVertex], indices: [UInt32], gridN: Int) {
         buildGrid(chunk: chunk, world: world, stride: 1)
     }
 
@@ -83,11 +153,53 @@ public enum MTMeshBuilder {
         for chunk: MTChunk,
         world: MTTerrainWorld,
         distanceFactor: Float
-    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+    ) -> (vertices: [MTVertex], indices: [UInt32], gridN: Int) {
         // LOD disabled: T-junction vertex mismatches cause visible cracks.
         // The 5x build speedup makes full-res everywhere fast enough.
         // TODO: implement proper border stitching to re-enable LOD.
         buildGrid(chunk: chunk, world: world, stride: 1)
+    }
+
+    // MARK: Shared index buffers
+
+    /// Cache of grid+skirt index arrays keyed by grid size `n`.
+    /// The topology is identical for every chunk at a given resolution,
+    /// so the index array is built once and shared.
+    private static var indexCache: [Int: [UInt32]] = [:]
+    private static let indexCacheLock = NSLock()
+
+    /// Grid + skirt indices for an n×n vertex grid. Pure function of `n`;
+    /// the result is cached because every chunk at the same resolution
+    /// shares it. The renderer caches the corresponding MTLBuffers.
+    public static func cachedIndices(n: Int) -> [UInt32] {
+        indexCacheLock.lock()
+        defer { indexCacheLock.unlock() }
+        if let cached = indexCache[n] { return cached }
+        var indices = gridIndices(n: n)
+        indices.append(contentsOf: skirtIndices(n: n, base: UInt32(n * n)))
+        indexCache[n] = indices
+        return indices
+    }
+
+    /// Skirt quad indices for an n×n grid whose vertices start at 0 and
+    /// whose skirt vertices start at `base`. Pure function of (n, base).
+    private static func skirtIndices(n: Int, base: UInt32) -> [UInt32] {
+        var edge: [UInt32] = []
+        edge.reserveCapacity(4 * n)
+        for a in 0..<n { edge.append(UInt32(a)) }                                        // j = 0
+        for b in 1..<n { edge.append(UInt32(b * n + (n - 1))) }                          // i = n-1
+        for a in stride(from: n - 2, through: 0, by: -1) { edge.append(UInt32((n - 1) * n + a)) } // j = n-1
+        for b in stride(from: n - 2, through: 1, by: -1) { edge.append(UInt32(b * n)) }  // i = 0
+        var indices: [UInt32] = []
+        indices.reserveCapacity(edge.count * 6)
+        for (k, vi) in edge.enumerated() {
+            let si = base + UInt32(k)
+            let sj = base + UInt32((k + 1) % edge.count)
+            let vj = edge[(k + 1) % edge.count]
+            // Outward-facing quad: (vi, vj, sj), (vi, sj, si)
+            indices.append(contentsOf: [vi, vj, sj, vi, sj, si])
+        }
+        return indices
     }
 
     // MARK: Water
@@ -100,7 +212,7 @@ public enum MTMeshBuilder {
         size: Float,
         level: Float,
         color: SIMD3<Float> = SIMD3<Float>(0.16, 0.42, 0.66)
-    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+    ) -> (vertices: [MTVertex], indices: [UInt32], gridN: Int) {
         let segments = 64
         let n = segments + 1
         var vertices: [MTVertex] = []
@@ -116,7 +228,9 @@ public enum MTMeshBuilder {
                 ))
             }
         }
-        return (vertices, gridIndices(n: n))
+        // Water has no skirt and is built once (not per chunk);
+        // grid indices are cheap here.
+        return (vertices, gridIndices(n: n), n)
     }
 
     // MARK: Structures
@@ -152,7 +266,7 @@ public enum MTMeshBuilder {
         chunk: MTChunk,
         world: MTTerrainWorld,
         stride: Int
-    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+    ) -> (vertices: [MTVertex], indices: [UInt32], gridN: Int) {
         let res = chunk.resolution
         precondition(res >= 2, "MTChunk resolution must be >= 2")
         precondition(chunk.heights.count == res * res,
@@ -175,14 +289,17 @@ public enum MTMeshBuilder {
         let heightScale = cfg.heightScale
         // H3: hoist noise pair for lock-free border normal sampling.
         // world.heightAt() takes 2 locks per call; we do ~1000 border
-        // samples per chunk. Using mtHeightSampleField directly avoids all locks.
+        // samples per chunk. Using mtHeightSample directly avoids all locks.
         let (meshNoise, meshWarpNoise) = world.noisePair()
         let meshField = MTHeightFieldConfig(base: cfg.noise,
                                             continentScale: cfg.continentScale,
                                             riverScale: cfg.riverScale,
                                             mountainSharpness: cfg.mountainSharpness)
 
-        func h(_ i: Int, _ j: Int) -> Float { chunk.heights[j * res + i] }
+        // Heights are UInt16 quantized (0...65535 maps to 0...1).
+        func h(_ i: Int, _ j: Int) -> Float {
+            Float(chunk.heights[j * res + i]) / 65535.0
+        }
 
         var vertices: [MTVertex] = []
         vertices.reserveCapacity(n * n)
@@ -235,30 +352,26 @@ public enum MTMeshBuilder {
                 ))
             }
         }
-        var (allVertices, allIndices) = (vertices, gridIndices(n: n))
+        var allVertices = vertices
         // Solid terrain: add vertical skirts around the chunk edges so the
         // world looks like a solid block, not a floating sheet. The skirt
         // drops straight down from each edge vertex.
-        appendSkirt(vertices: &allVertices, indices: &allIndices, n: n,
-                    worldSize: worldSize, originX: originX, originZ: originZ,
-                    world: world)
-        return (allVertices, allIndices)
+        appendSkirtVertices(vertices: &allVertices, n: n,
+                            world: world)
+        // Grid + skirt indices are topology-fixed for a given n — shared
+        // across all chunks via the cache (saves ~1.5MB per chunk).
+        return (allVertices, cachedIndices(n: n), n)
     }
 
-    /// Appends a vertical skirt around the chunk border. Each edge vertex
-    /// gets a duplicate pushed down by `skirtDepth`; quads connect the edge
-    /// to its lowered twin. Wound to face outward.
-    private static func appendSkirt(
+    /// Appends skirt vertices (not indices) around the chunk border. Each
+    /// edge vertex gets a duplicate pushed straight down; see `skirtIndices`
+    /// for the quad topology, which is shared via `cachedIndices`.
+    private static func appendSkirtVertices(
         vertices: inout [MTVertex],
-        indices: inout [UInt32],
         n: Int,
-        worldSize: Float,
-        originX: Float,
-        originZ: Float,
         world: MTTerrainWorld
     ) {
         let skirtDepth = world.config.heightScale * 0.35 + 10
-        let base = UInt32(vertices.count)
         // Collect edge vertices in order: bottom, right, top, left.
         // L2: track edge index for axis-aligned normals (no sqrt needed).
         var edge: [UInt32] = []
@@ -276,19 +389,15 @@ public enum MTMeshBuilder {
 
         for (k, vi) in edge.enumerated() {
             let v = vertices[Int(vi)]
-            let px = v.position.x, pz = v.position.z
+            let p = v.position
+            let c = v.color
             // L2: axis-aligned outward normal (no sqrt).
             let nrm = edgeNormal[k]
             vertices.append(MTVertex(
-                position: SIMD3<Float>(px, v.position.y - skirtDepth, pz),
+                position: SIMD3<Float>(p.x, p.y - skirtDepth, p.z),
                 normal: nrm,
-                color: SIMD3<Float>(v.color.x * 0.55, v.color.y * 0.55, v.color.z * 0.55)
+                color: SIMD3<Float>(c.x * 0.55, c.y * 0.55, c.z * 0.55)
             ))
-            let si = base + UInt32(k)
-            let sj = base + UInt32((k + 1) % edge.count)
-            let vj = edge[(k + 1) % edge.count]
-            // Outward-facing quad: (vi, vj, sj), (vi, sj, si)
-            indices.append(contentsOf: [vi, vj, sj, vi, sj, si])
         }
     }
 

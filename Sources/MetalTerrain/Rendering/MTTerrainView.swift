@@ -78,6 +78,14 @@ public final class MTTerrainView: MTKView {
         clearColor = MTLClearColor(red: 0.04, green: 0.06, blue: 0.11, alpha: 1.0)
     }
 
+    /// v1.2.0: when true, removes the 60fps cap (renders as fast as possible).
+    /// On ProMotion displays this can reach 120fps.
+    public var uncappedFPS: Bool = false {
+        didSet {
+            preferredFramesPerSecond = uncappedFPS ? 0 : 60
+        }
+    }
+
     // MARK: - Camera
 
     /// Sets the camera. Call every frame (or from `onFrame`) before draw.

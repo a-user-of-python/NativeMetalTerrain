@@ -87,6 +87,8 @@ struct TerrainView: UIViewRepresentable {
     /// Simulator mode: forces reduced settings (low res, fewer chunks).
     /// Auto-enabled in Xcode Simulator; toggleable in Debug menu.
     @Binding var simulatorMode: Bool
+    /// v1.2.0: uncapped FPS (removes 60fps limit).
+    @Binding var uncappedFPS: Bool
     /// Called once the Metal renderer exists, so ContentView can push
     /// sun updates directly without a SwiftUI re-render.
     var onRendererReady: ((MTTerrainRenderer) -> Void)?
@@ -101,7 +103,7 @@ struct TerrainView: UIViewRepresentable {
         #endif
         view.device = MTLCreateSystemDefaultDevice()
         view.delegate = context.coordinator
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = uncappedFPS ? 0 : 60
         view.isPaused = false
         view.enableSetNeedsDisplay = false
         view.colorPixelFormat = .bgra8Unorm
@@ -115,6 +117,8 @@ struct TerrainView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
+        // v1.2.0: apply uncapped FPS changes live.
+        uiView.preferredFramesPerSecond = uncappedFPS ? 0 : 60
         context.coordinator.sync(with: self)
     }
 

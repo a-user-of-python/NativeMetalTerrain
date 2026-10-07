@@ -28,10 +28,30 @@ final class CarRenderer {
     using namespace metal;
 
     struct CarVertexIn {
-        float4 position;
-        float4 normal;
-        float4 color;    // rgb = base color, a = material id
+        float3 position;
+        uint normalXY;   // octahedral-encoded normal
+        uint rgba;       // RGBA8888, a = material id
     };
+    // v1.2.0: decode helpers for packed 20-byte vertex.
+    float3 carDecodeNormal(uint e) {
+        int ex = as_type<int>(e & 0xffffu);
+        int ey = as_type<int>(e >> 16);
+        // Sign-extend 16-bit to 32-bit.
+        ex = (ex << 16) >> 16;
+        ey = (ey << 16) >> 16;
+        float2 f = float2(ex, ey) / 32767.0;
+        float3 n = float3(f, 1.0 - abs(f.x) - abs(f.y));
+        float t = max(-n.z, 0.0);
+        n.x += n.x >= 0.0 ? -t : t;
+        n.y += n.y >= 0.0 ? -t : t;
+        return normalize(n);
+    }
+    float4 carDecodeColor(uint c) {
+        return float4(float(c & 0xffu),
+                      float((c >> 8) & 0xffu),
+                      float((c >> 16) & 0xffu),
+                      float((c >> 24) & 0xffu)) / 255.0;
+    }
     struct CarUniforms {
         float4x4 viewProj;
         float4x4 model;
@@ -50,11 +70,13 @@ final class CarRenderer {
                                   constant CarUniforms &u [[buffer(1)]],
                                   uint vid [[vertex_id]]) {
         CarVaryings out;
-        float4 world = u.model * float4(v[vid].position.xyz, 1.0);
+        float4 world = u.model * float4(v[vid].position, 1.0);
         out.clipPos = u.viewProj * world;
         out.worldPos = world.xyz;
-        out.normal = (u.model * float4(v[vid].normal.xyz, 0.0)).xyz;
-        out.color = v[vid].color.rgb;
+        out.normal = (u.model * float4(carDecodeNormal(v[vid].normalXY), 0.0)).xyz;
+        float4 col = carDecodeColor(v[vid].rgba);
+        out.color = col.rgb;
+        out.material = col.a * 255.0;
         out.material = v[vid].color.a;
         return out;
     }

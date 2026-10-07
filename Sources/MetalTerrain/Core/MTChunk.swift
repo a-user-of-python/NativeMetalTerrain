@@ -21,15 +21,18 @@ public struct MTChunkCoord: Hashable, Comparable {
 
 /// One chunk's heightmap: a `resolution × resolution` grid of normalized
 /// heights in [0, 1], stored row-major (`index = iz * resolution + ix`).
+///
+/// Heights are quantized to UInt16 (0...65535 maps to 0...1): 6mm precision
+/// at 400m height scale — invisible — at half the memory of Float.
 public struct MTChunk {
     public var coord: MTChunkCoord
-    public var heights: [Float]  // resolution*resolution, normalized 0...1
+    public var heights: [UInt16]  // resolution*resolution, quantized 0...1
     public var resolution: Int
     /// Min/max height, computed during generation (M3: avoids two extra passes).
     public var minHeight: Float
     public var maxHeight: Float
 
-    public init(coord: MTChunkCoord, heights: [Float], resolution: Int,
+    public init(coord: MTChunkCoord, heights: [UInt16], resolution: Int,
                 minHeight: Float = 0, maxHeight: Float = 1) {
         self.coord = coord
         self.heights = heights
@@ -42,6 +45,6 @@ public struct MTChunk {
     public func height(ix: Int, iz: Int) -> Float {
         let cx = min(max(ix, 0), resolution - 1)
         let cz = min(max(iz, 0), resolution - 1)
-        return heights[cz * resolution + cx]
+        return Float(heights[cz * resolution + cx]) / 65535.0
     }
 }

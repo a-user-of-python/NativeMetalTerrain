@@ -1300,7 +1300,8 @@ public final class MTTerrainRenderer {
             let mesh = MTMeshBuilder.buildLOD(for: chunk, world: self.world,
                                               distanceFactor: distanceFactor)
             guard let vb = self.sharedBuffer(from: mesh.vertices),
-                  let ib = self.sharedBuffer(from: mesh.indices) else {
+                  let ib = self.sharedIndexBuffer(n: mesh.gridN,
+                                                   indices: mesh.indices) else {
                 self.cacheLock.lock()
                 self.pendingBuilds.remove(coord)
                 self.cacheLock.unlock()
@@ -1347,12 +1348,32 @@ public final class MTTerrainRenderer {
         }
     }
 
+    /// Shared index buffers keyed by grid size `n`. Chunk index topology
+    /// is identical for every chunk at a given resolution, so one MTLBuffer
+    /// serves all of them (saves ~1.5MB per chunk).
+    private var sharedIndexBuffers: [Int: MTLBuffer] = [:]
+    private let sharedIndexBufferLock = NSLock()
+
+    /// Returns the shared index MTLBuffer for grid size `n`, creating it
+    /// from `indices` on first use. Thread-safe (called on the build queue).
+    private func sharedIndexBuffer(n: Int, indices: [UInt32]) -> MTLBuffer? {
+        sharedIndexBufferLock.lock()
+        defer { sharedIndexBufferLock.unlock() }
+        if let buf = sharedIndexBuffers[n] { return buf }
+        guard let buf = sharedBuffer(from: indices) else { return nil }
+        sharedIndexBuffers[n] = buf
+        return buf
+    }
+
     private func invalidateCaches() {
         cacheLock.lock()
         chunkCache.removeAll()
         pendingBuilds.removeAll()
         buildGeneration &+= 1
         cacheLock.unlock()
+        sharedIndexBufferLock.lock()
+        sharedIndexBuffers.removeAll()
+        sharedIndexBufferLock.unlock()
         structureChunkSet = []
         clearStructureInstances()
     }

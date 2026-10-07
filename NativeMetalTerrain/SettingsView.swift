@@ -3,6 +3,8 @@ import SwiftUI
 /// App settings.
 struct SettingsView: View {
     @AppStorage("metalPreference") private var metalPreferenceRaw = MetalPreference.auto.rawValue
+    /// v1.2.0: uncapped FPS preference (persisted).
+    @AppStorage("uncappedFPS") private var uncappedFPS = false
 
     var metalPreference: Binding<MetalPreference> {
         Binding(
@@ -22,6 +24,12 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
 
                 Text(metalDescription)
+                    .font(.body)
+                    .foregroundColor(.gray)
+
+                Toggle("Uncapped FPS", isOn: $uncappedFPS)
+                    .font(.title2)
+                Text("Removes the 60fps limit. Higher frame rates, more battery drain.")
                     .font(.body)
                     .foregroundColor(.gray)
             }
