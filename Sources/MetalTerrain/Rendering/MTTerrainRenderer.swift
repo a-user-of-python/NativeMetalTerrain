@@ -332,6 +332,12 @@ public final class MTTerrainRenderer {
         // v1.2.5: GPU heightmap generation. Nil when the kernel is
         // unavailable — the world then uses the CPU path in generateChunk.
         world.heightmapCompute = MTHeightmapCompute(device: device)
+        // v1.2.6: GPU mesh building (padded heightmap -> packed vertices,
+        // no CPU roundtrip). Nil on failure — buildChunkAsync falls back
+        // to the CPU MTMeshBuilder path.
+        if let hc = world.heightmapCompute {
+            meshCompute = MTMeshCompute(device: device, heightmap: hc)
+        }
         loadStructureMeshes()
         // Skybox works on all devices (standard Metal 3).
         self.skybox = MTSkybox(device: device)
@@ -1011,6 +1017,9 @@ public final class MTTerrainRenderer {
     /// v1.2.3: limits concurrent chunk builds to avoid GPU stalls when many
     /// chunks finish at once (the lag spike when moving fast).
     private let buildSemaphore = DispatchSemaphore(value: 2)
+    /// v1.2.6: GPU mesh builder (heightmap + vertices on GPU). Nil when
+    /// the kernel is unavailable — buildChunkAsync uses the CPU path.
+    private var meshCompute: MTMeshCompute?
     // Generation counter: bumped by invalidateCaches(). Background builds
     // capture the generation at dispatch; if it changed by completion,
     // the mesh is stale (built from an old config) and must be dropped.
@@ -1305,6 +1314,45 @@ public final class MTTerrainRenderer {
             // The mesh shader takes arbitrary resolution+lodStride, so half-res
             // heightmaps work identically on both paths.
             let resScale: Float = distanceFactor > 0.4 ? 0.5 : 1.0
+            // v1.2.6: full-GPU mesh path — padded heightmap and packed
+            // vertices built on the GPU with no CPU roundtrip. Any failure
+            // falls through to the CPU path below.
+            if let mc = self.meshCompute {
+                let res = max(2, Int(Float(max(2, self.world.config.chunkResolution)) * resScale))
+                if let gpu = mc.buildMesh(coord: coord, res: res, world: self.world) {
+                    let gpuIndices = MTMeshBuilder.cachedIndices(n: gpu.gridN)
+                    if let ib = self.sharedIndexBuffer(n: gpu.gridN, indices: gpuIndices) {
+                        #if M3_FEATURES
+                        // Heightmap buffer for the mesh-shading path.
+                        let hb = self.sharedBuffer(from: gpu.heights)
+                        #endif
+                        self.cacheLock.lock()
+                        // Drop stale builds: config changed while generating.
+                        if generation == self.buildGeneration {
+                            let y0 = self.world.worldY(forHeight: gpu.minHeight)
+                            let y1 = self.world.worldY(forHeight: gpu.maxHeight)
+                            let x0 = Float(coord.x) * size
+                            let z0 = Float(coord.z) * size
+                            self.chunkCache[coord] = ChunkMesh(
+                                vertexBuffer: gpu.vertexBuffer,
+                                indexBuffer: ib,
+                                indexCount: gpuIndices.count,
+                                lastUsed: Date().timeIntervalSince1970,
+                                boundsMin: SIMD3<Float>(x0, min(y0, y1) - 20, z0),
+                                boundsMax: SIMD3<Float>(x0 + size, max(y0, y1) + 20, z0 + size)
+                            )
+                            #if M3_FEATURES
+                            self.chunkCache[coord]?.heightmapBuffer = hb
+                            self.chunkCache[coord]?.heightmapResolution = res
+                            self.chunkCache[coord]?.lodStride = distanceFactor > 0.4 ? 2 : 1
+                            #endif
+                        }
+                        self.pendingBuilds.remove(coord)
+                        self.cacheLock.unlock()
+                        return
+                    }
+                }
+            }
             let chunk = self.world.generateChunk(at: coord, resolutionScale: resScale)
             let mesh = MTMeshBuilder.buildLOD(for: chunk, world: self.world,
                                               distanceFactor: distanceFactor)
