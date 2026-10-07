@@ -201,6 +201,7 @@ struct ContentView: View {
                             }
                         }
                     }
+                    },
                     avoidVolcanoesOnSpawn: avoidVolcanoes,
                     onPlayerDeath: { handlePlayerDeath() }
                 )
