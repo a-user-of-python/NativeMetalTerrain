@@ -34,6 +34,23 @@ struct ContentView: View {
     /// a race where the initial pre-load rebuild's onRendererReady fires after
     /// the load path ran (its async block must not consume the settings).
     @State private var pendingRendererToken: Int?
+    /// v1.1.1: renderer-only settings held in @State so sliders update the UI
+    /// (mutating a class property doesn't trigger SwiftUI re-render) and
+    /// survive rebuilds (applied to each new renderer in onRendererReady).
+    @State private var sunAzimuthState: Float = 45
+    @State private var sunElevationState: Float = 50
+    @State private var waterDeepColorState = SIMD3<Float>(0.01, 0.22, 0.35)
+    @State private var waterShallowColorState = SIMD3<Float>(0.15, 0.55, 0.65)
+    @State private var waveSpeedState: Float = 1.0
+    @State private var waveAmplitudeState: Float = 1.0
+    @State private var waterOpacityState: Float = 0.82
+    @State private var skyboxEnabledState = true
+    @State private var detailAmountState: Float = 1.0
+    @State private var timeOfDayState: Float = 12
+    @State private var timeOfDayEnabledState = false
+    @State private var timeOfDaySpeedState: Float = 1.0
+    @State private var cloudAmountState: Float = 0.4
+    @State private var starsEnabledState = true
     /// Polls renderer.currentFPS 2x/sec (avoids render-loop @State writes).
     private let fpsTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var shaderEffectsEnabled = true
@@ -127,6 +144,49 @@ struct ContentView: View {
                                 renderer.detailAmount = saved.detailAmount ?? 1.0
                                 renderer.cloudAmount = saved.cloudAmount ?? 0.4
                                 renderer.starsEnabled = saved.starsEnabled ?? true
+                                // v1.1.1: sync @State with loaded values
+                                sunAzimuthState = saved.sunAzimuth ?? 45
+                                sunElevationState = saved.sunElevation ?? 50
+                                timeOfDayState = saved.timeOfDay ?? 12
+                                timeOfDaySpeedState = saved.timeOfDaySpeed ?? 1.0
+                                timeOfDayEnabledState = saved.timeOfDayEnabled ?? false
+                                skyboxEnabledState = saved.skyboxEnabled ?? true
+                                detailAmountState = saved.detailAmount ?? 1.0
+                                cloudAmountState = saved.cloudAmount ?? 0.4
+                                starsEnabledState = saved.starsEnabled ?? true
+                                waveSpeedState = saved.waveSpeed ?? 1.0
+                                waveAmplitudeState = saved.waveAmplitude ?? 1.0
+                                waterOpacityState = saved.waterOpacity ?? 0.82
+                                waterDeepColorState = SIMD3<Float>(
+                                    saved.waterDeepR ?? 0.01,
+                                    saved.waterDeepG ?? 0.22,
+                                    saved.waterDeepB ?? 0.35)
+                                waterShallowColorState = SIMD3<Float>(
+                                    saved.waterShallowR ?? 0.15,
+                                    saved.waterShallowG ?? 0.55,
+                                    saved.waterShallowB ?? 0.65)
+                            }
+                            // v1.1.1: apply @State values to every new renderer
+                            // (survives rebuilds; fixes Done reverting to defaults).
+                            renderer.sunAzimuth = sunAzimuthState
+                            renderer.sunElevation = sunElevationState
+                            renderer.waterDeepColor = waterDeepColorState
+                            renderer.waterShallowColor = waterShallowColorState
+                            renderer.waveSpeed = waveSpeedState
+                            renderer.waveAmplitude = waveAmplitudeState
+                            renderer.waterOpacity = waterOpacityState
+                            renderer.detailAmount = detailAmountState
+                            renderer.cloudAmount = cloudAmountState
+                            renderer.starsEnabled = starsEnabledState
+                            // Time-of-day: set clock/speed first, then enabled
+                            // last (its didSet recomputes sun position).
+                            renderer.timeOfDay = timeOfDayState
+                            renderer.timeOfDaySpeed = timeOfDaySpeedState
+                            renderer.timeOfDayEnabled = timeOfDayEnabledState
+                            if skyboxEnabledState {
+                                renderer.enableSkybox()
+                            } else {
+                                renderer.skybox = nil
                             }
                         }
                     }
@@ -272,16 +332,17 @@ struct ContentView: View {
                                 shaderEffectsEnabled: $shaderEffectsEnabled,
                                 viewDistance: $viewDistance,
                                 sunAzimuth: Binding(
-                                    get: { terrainRenderer?.sunAzimuth ?? 45 },
-                                    set: { terrainRenderer?.sunAzimuth = $0 }
+                                    get: { sunAzimuthState },
+                                    set: { sunAzimuthState = $0; terrainRenderer?.sunAzimuth = $0 }
                                 ),
                                 sunElevation: Binding(
-                                    get: { terrainRenderer?.sunElevation ?? 50 },
-                                    set: { terrainRenderer?.sunElevation = $0 }
+                                    get: { sunElevationState },
+                                    set: { sunElevationState = $0; terrainRenderer?.sunElevation = $0 }
                                 ),
                                 skyboxEnabled: Binding(
-                                    get: { terrainRenderer?.skybox != nil },
+                                    get: { skyboxEnabledState },
                                     set: { newValue in
+                                        skyboxEnabledState = newValue
                                         if newValue {
                                             terrainRenderer?.enableSkybox()
                                         } else {
@@ -290,48 +351,48 @@ struct ContentView: View {
                                     }
                                 ),
                                 detailAmount: Binding(
-                                    get: { terrainRenderer?.detailAmount ?? 1.0 },
-                                    set: { terrainRenderer?.detailAmount = $0 }
+                                    get: { detailAmountState },
+                                    set: { detailAmountState = $0; terrainRenderer?.detailAmount = $0 }
                                 ),
                                 waveSpeed: Binding(
-                                    get: { terrainRenderer?.waveSpeed ?? 1.0 },
-                                    set: { terrainRenderer?.waveSpeed = $0 }
+                                    get: { waveSpeedState },
+                                    set: { waveSpeedState = $0; terrainRenderer?.waveSpeed = $0 }
                                 ),
                                 waveAmplitude: Binding(
-                                    get: { terrainRenderer?.waveAmplitude ?? 1.0 },
-                                    set: { terrainRenderer?.waveAmplitude = $0 }
+                                    get: { waveAmplitudeState },
+                                    set: { waveAmplitudeState = $0; terrainRenderer?.waveAmplitude = $0 }
                                 ),
                                 waterOpacity: Binding(
-                                    get: { terrainRenderer?.waterOpacity ?? 0.82 },
-                                    set: { terrainRenderer?.waterOpacity = $0 }
+                                    get: { waterOpacityState },
+                                    set: { waterOpacityState = $0; terrainRenderer?.waterOpacity = $0 }
                                 ),
                                 waterDeepColor: Binding(
-                                    get: { terrainRenderer?.waterDeepColor ?? SIMD3<Float>(0.01, 0.22, 0.35) },
-                                    set: { terrainRenderer?.waterDeepColor = $0 }
+                                    get: { waterDeepColorState },
+                                    set: { waterDeepColorState = $0; terrainRenderer?.waterDeepColor = $0 }
                                 ),
                                 waterShallowColor: Binding(
-                                    get: { terrainRenderer?.waterShallowColor ?? SIMD3<Float>(0.15, 0.55, 0.65) },
-                                    set: { terrainRenderer?.waterShallowColor = $0 }
+                                    get: { waterShallowColorState },
+                                    set: { waterShallowColorState = $0; terrainRenderer?.waterShallowColor = $0 }
                                 ),
                                 timeOfDay: Binding(
-                                    get: { terrainRenderer?.timeOfDay ?? 12 },
-                                    set: { terrainRenderer?.timeOfDay = $0 }
+                                    get: { timeOfDayState },
+                                    set: { timeOfDayState = $0; terrainRenderer?.timeOfDay = $0 }
                                 ),
                                 timeOfDayEnabled: Binding(
-                                    get: { terrainRenderer?.timeOfDayEnabled ?? false },
-                                    set: { terrainRenderer?.timeOfDayEnabled = $0 }
+                                    get: { timeOfDayEnabledState },
+                                    set: { timeOfDayEnabledState = $0; terrainRenderer?.timeOfDayEnabled = $0 }
                                 ),
                                 timeOfDaySpeed: Binding(
-                                    get: { terrainRenderer?.timeOfDaySpeed ?? 1.0 },
-                                    set: { terrainRenderer?.timeOfDaySpeed = $0 }
+                                    get: { timeOfDaySpeedState },
+                                    set: { timeOfDaySpeedState = $0; terrainRenderer?.timeOfDaySpeed = $0 }
                                 ),
                                 cloudAmount: Binding(
-                                    get: { terrainRenderer?.cloudAmount ?? 0.4 },
-                                    set: { terrainRenderer?.cloudAmount = $0 }
+                                    get: { cloudAmountState },
+                                    set: { cloudAmountState = $0; terrainRenderer?.cloudAmount = $0 }
                                 ),
                                 starsEnabled: Binding(
-                                    get: { terrainRenderer?.starsEnabled ?? true },
-                                    set: { terrainRenderer?.starsEnabled = $0 }
+                                    get: { starsEnabledState },
+                                    set: { starsEnabledState = $0; terrainRenderer?.starsEnabled = $0 }
                                 ),
                                 structureKindWeights: Binding(
                                     get: { shelfConfig.structureKindWeights },
