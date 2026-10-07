@@ -167,20 +167,20 @@ fragment float4 sky_fragment(MTSkyVaryings in [[stage_in]],
         float3 sd = viewDir * 300.0;
         float3 cell = floor(sd);
         float h = fract(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
-        if (h > 0.997) {
+        if (h > 0.995) {
             // Star position within its cell; distance from center = size.
             float3 f = fract(sd) - 0.5;
             float d = length(f);
             // Twinkle: subtle brightness oscillation, different phase/speed per star.
             float tw = 0.65 + 0.35 * sin(time * (1.5 + h * 5.0) + h * 61.7);
-            // Brighter stars (higher h) are slightly larger.
-            float size = 0.06 + (h - 0.997) * 20.0;
+            // Brighter stars (higher h) are slightly larger. v1.1.2: bigger.
+            float size = 0.09 + (h - 0.995) * 14.0;
             float bright = smoothstep(size, 0.0, d) * tw;
             // Vary star color slightly: blue-white to warm white.
             float3 starCol = mix(float3(0.75, 0.85, 1.0), float3(1.0, 0.95, 0.85), fract(h * 7.31));
             // Fade near the horizon and scale by night amount.
             float horizonFade = smoothstep(0.02, 0.20, viewDir.y);
-            col += starCol * bright * nightAmt * horizonFade * 0.9;
+            col += starCol * bright * nightAmt * horizonFade * 1.2;
         }
     }
 
