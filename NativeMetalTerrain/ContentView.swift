@@ -200,7 +200,6 @@ struct ContentView: View {
                                 renderer.skybox = nil
                             }
                         }
-                    }
                     },
                     avoidVolcanoesOnSpawn: avoidVolcanoes,
                     onPlayerDeath: { handlePlayerDeath() }
