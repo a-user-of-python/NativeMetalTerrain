@@ -922,7 +922,7 @@ struct StatRow: View {
                     guard history.count > 1 else { return }
                     let w = geo.size.width
                     let h = geo.size.height
-                    let stepX = w / CGFloat(max(history.count - 1, 1))
+                    let stepX = w / CGFloat(Swift.max(history.count - 1, 1))
                     for (i, val) in history.enumerated() {
                         let x = CGFloat(i) * stepX
                         let y = h - (CGFloat(min(val, max)) / CGFloat(max)) * h
