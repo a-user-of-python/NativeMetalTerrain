@@ -17,6 +17,7 @@
 		A30000000000000000000028 /* CommandBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000018 /* CommandBar.swift */; };
 		C00000000000000000010003 /* ControlShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* ControlShelf.swift */; };
 		C00000000000000000010002 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* SettingsView.swift */; };
+		C00000000000000000010003 /* StatsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* StatsOverlay.swift */; };
 		C00000000000000000010001 /* WorldsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* WorldsView.swift */; };
 		C00000000000000000010000 /* MainMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000000 /* MainMenu.swift */; };
 		A30000000000000000000029 /* CommandRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000019 /* CommandRegistry.swift */; };
@@ -35,6 +36,7 @@
 		A30000000000000000000018 /* CommandBar.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandBar.swift; sourceTree = "<group>"; };
 		C00000000000000000000003 /* ControlShelf.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ControlShelf.swift; sourceTree = "<group>"; };
 		C00000000000000000000002 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		C00000000000000000000003 /* StatsOverlay.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StatsOverlay.swift; sourceTree = "<group>"; };
 		C00000000000000000000001 /* WorldsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WorldsView.swift; sourceTree = "<group>"; };
 		C00000000000000000000000 /* MainMenu.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MainMenu.swift; sourceTree = "<group>"; };
 		A30000000000000000000019 /* CommandRegistry.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandRegistry.swift; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 				A30000000000000000000018 /* CommandBar.swift */,
 				C00000000000000000000003 /* ControlShelf.swift */,
 				C00000000000000000000002 /* SettingsView.swift */,
+				C00000000000000000000003 /* StatsOverlay.swift */,
 				C00000000000000000000001 /* WorldsView.swift */,
 				C00000000000000000000000 /* MainMenu.swift */,
 				A30000000000000000000019 /* CommandRegistry.swift */,
@@ -167,6 +170,7 @@
 				A30000000000000000000028 /* CommandBar.swift in Sources */,
 				C00000000000000000010003 /* ControlShelf.swift in Sources */,
 				C00000000000000000010002 /* SettingsView.swift in Sources */,
+				C00000000000000000010003 /* StatsOverlay.swift in Sources */,
 				C00000000000000000010001 /* WorldsView.swift in Sources */,
 				C00000000000000000010000 /* MainMenu.swift in Sources */,
 				A30000000000000000000029 /* CommandRegistry.swift in Sources */,
