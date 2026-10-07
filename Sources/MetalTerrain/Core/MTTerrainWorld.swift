@@ -218,21 +218,31 @@ public final class MTTerrainWorld {
 
         var heights = [UInt16](repeating: 0, count: res * res)
         // M3: track min/max in the fill loop (avoids two extra passes).
-        var minH: Float = .greatestFiniteMagnitude
-        var maxH: Float = -.greatestFiniteMagnitude
-        for iz in 0..<res {
-            let wz = z0 + Double(iz) * step
-            for ix in 0..<res {
-                let wx = x0 + Double(ix) * step
-                let h = mtHeightSampleField(
-                    x: wx, y: wz, field: field,
-                    noise: noise, warpNoise: warpNoise)
-                // Quantize to 16-bit (6mm at 400m scale — invisible).
-                heights[iz * res + ix] = UInt16((h * 65535.0).rounded())
-                if h < minH { minH = h }
-                if h > maxH { maxH = h }
+        // v1.2.4: parallelize across CPU cores with concurrentPerform.
+        // Each row is independent (noise is stateless per-coordinate).
+        var rowMin = [Float](repeating: .greatestFiniteMagnitude, count: res)
+        var rowMax = [Float](repeating: -.greatestFiniteMagnitude, count: res)
+        heights.withUnsafeMutableBufferPointer { hbuf in
+            DispatchQueue.concurrentPerform(iterations: res) { iz in
+                let wz = z0 + Double(iz) * step
+                var localMin: Float = .greatestFiniteMagnitude
+                var localMax: Float = -.greatestFiniteMagnitude
+                for ix in 0..<res {
+                    let wx = x0 + Double(ix) * step
+                    let h = mtHeightSampleField(
+                        x: wx, y: wz, field: field,
+                        noise: noise, warpNoise: warpNoise)
+                    // Quantize to 16-bit (6mm at 400m scale — invisible).
+                    hbuf[iz * res + ix] = UInt16((h * 65535.0).rounded())
+                    if h < localMin { localMin = h }
+                    if h > localMax { localMax = h }
+                }
+                rowMin[iz] = localMin
+                rowMax[iz] = localMax
             }
         }
+        let minH = rowMin.min() ?? 0
+        let maxH = rowMax.max() ?? 1
         return MTChunk(coord: coord, heights: heights, resolution: res,
                        minHeight: minH, maxHeight: maxH)
     }
