@@ -1005,6 +1005,9 @@ public final class MTTerrainRenderer {
     private let buildQueue = DispatchQueue(label: "com.MetalTerrain.meshBuild",
                                            qos: .userInitiated,
                                            attributes: .concurrent)
+    /// v1.2.3: limits concurrent chunk builds to avoid GPU stalls when many
+    /// chunks finish at once (the lag spike when moving fast).
+    private let buildSemaphore = DispatchSemaphore(value: 2)
     // Generation counter: bumped by invalidateCaches(). Background builds
     // capture the generation at dispatch; if it changed by completion,
     // the mesh is stale (built from an old config) and must be dropped.
@@ -1280,6 +1283,9 @@ public final class MTTerrainRenderer {
         cacheLock.unlock()
         buildQueue.async { [weak self] in
             guard let self = self else { return }
+            // v1.2.3: throttle concurrent builds to prevent lag spikes.
+            self.buildSemaphore.wait()
+            defer { self.buildSemaphore.signal() }
             // Early-out: if a newer generation was requested while this
             // block was queued (rapid Generate clicks), skip the expensive
             // work entirely instead of building then dropping it.
