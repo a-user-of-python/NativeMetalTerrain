@@ -459,7 +459,7 @@ public enum MTMeshBuilder {
                                                 biomes: biomes)
         if volcT > 0 {
             let basalt = basaltColor(wx: wx, wz: wz)
-            color = mix(color, basalt, volcT * 0.9)
+            color = mix(color, basalt, t: volcT * 0.9)
             if volcT > 0.45 { material = 1 }  // rock material on slopes
         }
         return (color, material)
