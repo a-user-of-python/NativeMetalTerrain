@@ -119,7 +119,11 @@ struct TerrainView: UIViewRepresentable {
 
     func updateUIView(_ uiView: MTKView, context: Context) {
         // v1.2.1: 120 for uncapped (0 = black screen bug on some iOS versions).
-        uiView.preferredFramesPerSecond = uncappedFPS ? 120 : 60
+        // v1.2.2: force apply even if value hasn't changed (SwiftUI may skip).
+        let targetFPS = uncappedFPS ? 120 : 60
+        if uiView.preferredFramesPerSecond != targetFPS {
+            uiView.preferredFramesPerSecond = targetFPS
+        }
         context.coordinator.sync(with: self)
     }
 

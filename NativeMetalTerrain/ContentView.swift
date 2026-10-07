@@ -60,13 +60,10 @@ struct ContentView: View {
     @State private var ramMB: Double = 0
     @State private var cpuPercent: Double = 0
     @State private var gpuMB: Double = 0
-    /// v1.2.1: estimated wattage.
-    @State private var wattage: Double = 0
     /// v1.2.1: stats overlay toggles (synced from Settings).
     @AppStorage("showCPU") private var showCPU = false
     @AppStorage("showGPU") private var showGPU = false
     @AppStorage("showMemory") private var showMemory = false
-    @AppStorage("showWattage") private var showWattage = false
     @AppStorage("showFPSGraph") private var showFPSGraph = false
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
@@ -282,14 +279,12 @@ struct ContentView: View {
                     // "modifying state during view update".
                     if let r = terrainRenderer { fps = r.currentFPS }
                     // v1.2.1: stats polled when any overlay is enabled.
-                    if showStats || showCPU || showGPU || showMemory || showWattage || showFPSGraph {
+                    if showStats || showCPU || showGPU || showMemory || showFPSGraph {
                         ramMB = Self.appMemoryMB()
                         cpuPercent = Self.appCPUPercent()
                         if let r = terrainRenderer {
                             gpuMB = r.gpuAllocatedMB
                         }
-                        // v1.2.1: wattage estimated from CPU+GPU load.
-                        wattage = Self.estimateWattage(cpuPercent: cpuPercent, gpuMB: gpuMB)
                     }
                 }
 
@@ -444,12 +439,11 @@ struct ContentView: View {
 
                 // v1.2.1: stats overlay with graphs (Settings toggles).
                 // Legacy `stats` command still works via showStats.
-                if showStats || showCPU || showGPU || showMemory || showWattage || showFPSGraph {
+                if showStats || showCPU || showGPU || showMemory || showFPSGraph {
                     StatsOverlay(
                         cpuPercent: cpuPercent,
                         gpuMB: gpuMB,
                         ramMB: ramMB,
-                        wattage: wattage,
                         fps: fps
                     )
                 }
@@ -783,18 +777,6 @@ struct ContentView: View {
         return total
     }
 
-    /// v1.2.1: Estimates power draw in watts from CPU and GPU load.
-    /// iOS has no public wattage API; this is a rough estimate based on
-    /// typical iPhone/iPad SoC power curves (idle ~1W, max ~12-15W).
-    static func estimateWattage(cpuPercent: Double, gpuMB: Double) -> Double {
-        // Base idle power + CPU contribution + GPU contribution.
-        // CPU: 0-100% maps to 0-6W. GPU: based on memory allocated as proxy
-        // for load (0-4GB maps to 0-5W).
-        let cpuW = min(cpuPercent / 100.0, 1.0) * 6.0
-        let gpuW = min(gpuMB / 4000.0, 1.0) * 5.0
-        return 1.0 + cpuW + gpuW
-    }
-
     /// Copies the current seed into the seed field so the user can tweak
     /// and regenerate a variation, or re-enter it later to revisit.
     private func cloneWorld() {
@@ -826,20 +808,17 @@ struct StatsOverlay: View {
     @AppStorage("showCPU") private var showCPU = false
     @AppStorage("showGPU") private var showGPU = false
     @AppStorage("showMemory") private var showMemory = false
-    @AppStorage("showWattage") private var showWattage = false
     @AppStorage("showFPSGraph") private var showFPSGraph = false
 
     let cpuPercent: Double
     let gpuMB: Double
     let ramMB: Double
-    let wattage: Double
     let fps: Double
 
     // History for graphs (last 60 samples = 30 seconds at 2Hz)
     @State private var cpuHistory: [Double] = []
     @State private var gpuHistory: [Double] = []
     @State private var ramHistory: [Double] = []
-    @State private var wattHistory: [Double] = []
     @State private var fpsHistory: [Double] = []
 
     var body: some View {
@@ -857,10 +836,6 @@ struct StatsOverlay: View {
                     if showMemory {
                         StatRow(label: "RAM", value: String(format: "%.0f MB", ramMB),
                                 history: ramHistory, color: .orange, max: 4000)
-                    }
-                    if showWattage {
-                        StatRow(label: "PWR", value: String(format: "%.1fW", wattage),
-                                history: wattHistory, color: .red, max: 20)
                     }
                     if showFPSGraph {
                         StatRow(label: "FPS", value: String(format: "%.0f", fps),
@@ -884,14 +859,12 @@ struct StatsOverlay: View {
         cpuHistory.append(cpuPercent)
         gpuHistory.append(gpuMB)
         ramHistory.append(ramMB)
-        wattHistory.append(wattage)
         fpsHistory.append(fps)
         let maxCount = 60
         if cpuHistory.count > maxCount {
             cpuHistory.removeFirst()
             gpuHistory.removeFirst()
             ramHistory.removeFirst()
-            wattHistory.removeFirst()
             fpsHistory.removeFirst()
         }
     }

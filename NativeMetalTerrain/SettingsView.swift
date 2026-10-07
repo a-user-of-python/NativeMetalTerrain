@@ -9,7 +9,6 @@ struct SettingsView: View {
     @AppStorage("showCPU") private var showCPU = false
     @AppStorage("showGPU") private var showGPU = false
     @AppStorage("showMemory") private var showMemory = false
-    @AppStorage("showWattage") private var showWattage = false
     @AppStorage("showFPSGraph") private var showFPSGraph = false
 
     var metalPreference: Binding<MetalPreference> {
@@ -44,7 +43,6 @@ struct SettingsView: View {
                 Toggle("CPU", isOn: $showCPU).font(.title2)
                 Toggle("GPU Memory", isOn: $showGPU).font(.title2)
                 Toggle("RAM", isOn: $showMemory).font(.title2)
-                Toggle("Wattage (est.)", isOn: $showWattage).font(.title2)
                 Toggle("FPS Graph", isOn: $showFPSGraph).font(.title2)
                 Text("Live stats with graphs, shown over the 3D view.")
                     .font(.body)
