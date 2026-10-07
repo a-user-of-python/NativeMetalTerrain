@@ -11,7 +11,8 @@
 //     if let skybox = skybox {
 //         skybox.sunAzimuth = self.sunAzimuth
 //         skybox.sunElevation = self.sunElevation
-//         skybox.draw(encoder: renderEncoder, viewProjection: viewProj)
+//         skybox.draw(encoder: renderEncoder, viewProjection: viewProj,
+//                     cameraPos: cameraPosition)
 //     }
 //
 // The skybox sets its own pipeline, depth-stencil, and cull state on the
@@ -129,16 +130,15 @@ public final class MTSkybox {
     ///   - time: Elapsed time in seconds, drives star twinkle and cloud drift.
     public func draw(encoder: MTLRenderCommandEncoder,
                      viewProjection: matrix_float4x4,
+                     cameraPos: SIMD3<Float>,
                      time: Float = 0) {
         let inv = viewProjection.inverse
-        // Recover the world-space camera position from the inverse
-        // view-projection: the camera sits at the projection origin.
-        let c4 = inv * SIMD4<Float>(0, 0, 0, 1)
-        let camPos = SIMD3<Float>(c4.x, c4.y, c4.z) / c4.w
+        // Camera position is passed directly by the caller (drawScene),
+        // avoiding the inverse-multiply recovery that used to run here.
 
         var uniforms = MTSkyUniforms(
             viewProjInverse: inv,
-            cameraPos: SIMD4<Float>(camPos, 1),
+            cameraPos: SIMD4<Float>(cameraPos, 1),
             sunDir: SIMD4<Float>(sunDirection(), 0),
             skyParams: SIMD4<Float>(sunElevation * .pi / 180, time,
                                     min(max(cloudAmount, 0), 1),

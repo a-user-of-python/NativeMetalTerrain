@@ -218,28 +218,29 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
 // shader texture, not the physical triangles. No shore-specific effects.
 fragment float4 water_fragment(MTVaryings in [[stage_in]],
                                constant MTUniforms &uniforms [[buffer(1)]],
-                               constant float &alpha [[buffer(2)]],
                                constant MTWaterParams &waterParams [[buffer(3)]]) {
     float t = uniforms.misc.x;
     float waveSpeed = waterParams.deepAndSpeed.w;
     float waveAmp = waterParams.shallowAndAmp.w;
+    // v1.1.0: hoist t * waveSpeed (was recomputed ~10x per pixel).
+    float tw = t * waveSpeed;
     float2 p = in.worldPos.xz;
 
     // Animated wave normals (texture only, not geometry).
     float2 grad = float2(0.0);
-    grad += (0.14 * waveAmp) * float2(cos(dot(p, float2(0.11, 0.07)) + t * 0.9 * waveSpeed),
-                                     cos(dot(p, float2(-0.06, 0.13)) + t * 0.7 * waveSpeed));
-    grad += (0.09 * waveAmp) * float2(cos(dot(p, float2(0.31, -0.24)) + t * 1.7 * waveSpeed),
-                                     cos(dot(p, float2(0.22, 0.35)) + t * 1.3 * waveSpeed));
-    float n1 = fract(sin(dot(floor(p * 2.0 + t * 0.5 * waveSpeed), float2(12.9898, 78.233))) * 43758.5453);
-    float n2 = fract(sin(dot(floor(p * 2.0 - t * 0.3 * waveSpeed), float2(39.346, 11.135))) * 24634.6345);
+    grad += (0.14 * waveAmp) * float2(cos(dot(p, float2(0.11, 0.07)) + tw * 0.9),
+                                     cos(dot(p, float2(-0.06, 0.13)) + tw * 0.7));
+    grad += (0.09 * waveAmp) * float2(cos(dot(p, float2(0.31, -0.24)) + tw * 1.7),
+                                     cos(dot(p, float2(0.22, 0.35)) + tw * 1.3));
+    float n1 = fract(sin(dot(floor(p * 2.0 + tw * 0.5), float2(12.9898, 78.233))) * 43758.5453);
+    float n2 = fract(sin(dot(floor(p * 2.0 - tw * 0.3), float2(39.346, 11.135))) * 24634.6345);
     grad += (float2(n1, n2) - 0.5) * (0.22 * waveAmp);
 
     float3 n = normalize(float3(-grad.x, 1.0, -grad.y));
 
     // Procedural texture: scrolling noise layers.
-    float2 uv1 = p * 0.05 + float2(t * 0.03 * waveSpeed, t * 0.017 * waveSpeed);
-    float2 uv2 = p * 0.11 - float2(t * 0.021 * waveSpeed, t * 0.038 * waveSpeed);
+    float2 uv1 = p * 0.05 + float2(tw * 0.03, tw * 0.017);
+    float2 uv2 = p * 0.11 - float2(tw * 0.021, tw * 0.038);
     float tex1 = fract(sin(dot(floor(uv1 * 8.0), float2(12.9898, 78.233))) * 43758.5453);
     float tex2 = fract(sin(dot(floor(uv2 * 8.0), float2(39.346, 11.135))) * 24634.6345);
     float texture_ = (tex1 * 0.6 + tex2 * 0.4);
@@ -249,13 +250,16 @@ fragment float4 water_fragment(MTVaryings in [[stage_in]],
     float3 base = mix(deepColor, shallowColor, texture_ * 0.55);
 
     float3 viewDir = normalize(uniforms.cameraPos.xyz - in.worldPos);
-    float3 lightDir = normalize(uniforms.lightDir.xyz);
+    // v1.1.0: lightDir is already normalized on the CPU in writeUniforms.
+    float3 lightDir = uniforms.lightDir.xyz;
     float diff = max(dot(n, lightDir), 0.0);
 
     float3 h = normalize(lightDir + viewDir);
     float spec = pow(max(dot(n, h), 0.0), 70.0) * 1.8;
 
-    float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+    // v1.1.0: f*f*f instead of pow(f, 3.0).
+    float fresBase = 1.0 - max(dot(n, viewDir), 0.0);
+    float fres = fresBase * fresBase * fresBase;
     float3 skyReflect = float3(0.40, 0.60, 0.75) * fres * 0.7;
 
     float3 col = base * (0.45 + diff * 0.75) + spec * uniforms.sunColor.rgb + skyReflect;

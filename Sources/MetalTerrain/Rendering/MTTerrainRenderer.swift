@@ -363,7 +363,7 @@ public final class MTTerrainRenderer {
             }
         }
 
-        let now2 = Date().timeIntervalSince1970
+        // v1.1.0: reuse `now` from above (single timestamp per frame).
         var toBuild: [MTChunkCoord] = []
         cacheLock.lock()
         // Evict anything well outside the view radius (+1 chunk buffer).
@@ -385,7 +385,7 @@ public final class MTTerrainRenderer {
         }
         for coord in needed {
             if var mesh = chunkCache[coord] {
-                mesh.lastUsed = now2
+                mesh.lastUsed = now
                 chunkCache[coord] = mesh
             } else if !pendingBuilds.contains(coord) {
                 pendingBuilds.insert(coord)
@@ -496,12 +496,18 @@ public final class MTTerrainRenderer {
         guard w > 0 && h > 0,
               let commandBuffer = commandQueue.makeCommandBuffer() else { return }
 
-        // Depth texture for the reflection pass.
-        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .depth32Float, width: w, height: h, mipmapped: false)
-        depthDesc.storageMode = .private
-        depthDesc.usage = .renderTarget
-        guard let depthTex = device.makeTexture(descriptor: depthDesc) else { return }
+        // Depth texture for the reflection pass — cached and reused;
+        // only recreated when the reflection target size changes.
+        if reflectionDepthTexture == nil ||
+            reflectionDepthSize.width != w || reflectionDepthSize.height != h {
+            let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .depth32Float, width: w, height: h, mipmapped: false)
+            depthDesc.storageMode = .private
+            depthDesc.usage = .renderTarget
+            reflectionDepthTexture = device.makeTexture(descriptor: depthDesc)
+            reflectionDepthSize = (w, h)
+        }
+        guard let depthTex = reflectionDepthTexture else { return }
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = texture
@@ -523,11 +529,13 @@ public final class MTTerrainRenderer {
 
         // Use a dedicated uniform slot (beyond the frame slots) so the
         // reflection pass doesn't disturb the main render state.
+        // includeSky: false — the reflection target is tiny (e.g. 256x128
+        // for car mirrors); sky detail (clouds, stars) is invisible there.
         let reflectionSlot = maxFramesInFlight * slotsPerFrame
         let time = Float(Date().timeIntervalSince(startTime))
         drawScene(encoder: encoder, viewProj: mirrorViewProj, cameraPos: cameraPosition,
                   terrainSlot: reflectionSlot, waterSlot: reflectionSlot + 1, time: time,
-                  includeStructures: false, includeWater: false)
+                  includeStructures: false, includeWater: false, includeSky: false)
 
         encoder.endEncoding()
         commandBuffer.commit()
@@ -536,11 +544,14 @@ public final class MTTerrainRenderer {
 
     /// Core scene rendering: skybox, terrain chunks, optionally structures
     /// and water. Shared by `draw(in:)` and `renderReflection(to:from:)`.
+    /// - Parameter includeSky: when false, skips the skybox draw (used by
+    ///   the reflection pass, where the tiny target makes sky detail invisible).
     private func drawScene(encoder: MTLRenderCommandEncoder,
                            viewProj: simd_float4x4,
                            cameraPos: SIMD3<Float>,
                            terrainSlot: Int, waterSlot: Int, time: Float,
-                           includeStructures: Bool, includeWater: Bool) {
+                           includeStructures: Bool, includeWater: Bool,
+                           includeSky: Bool = true) {
         writeUniforms(slot: terrainSlot, model: matrix_identity_float4x4, time: time,
                        viewProj: viewProj, cameraPos: cameraPos)
         // Water plane is built around the XZ origin; recenter it under the camera.
@@ -564,12 +575,14 @@ public final class MTTerrainRenderer {
         // writes. Terrain drawn afterward occludes it with normal depth.
         // (Skybox sets its own depth/cull state; terrain state is set above
         // and re-applied below, so wireframe mode never affects the sky.)
-        if let skybox = skybox {
+        // Skipped when includeSky is false (reflection pass).
+        if includeSky, let skybox = skybox {
             skybox.sunAzimuth = self.sunAzimuth
             skybox.sunElevation = self.sunElevation
             skybox.cloudAmount = self.cloudAmount
             skybox.starsEnabled = self.starsEnabled
-            skybox.draw(encoder: encoder, viewProjection: viewProj, time: time)
+            skybox.draw(encoder: encoder, viewProjection: viewProj,
+                        cameraPos: cameraPos, time: time)
             encoder.setDepthStencilState(depthState)
             encoder.setTriangleFillMode(.fill)
             encoder.setCullMode(.back)
@@ -632,8 +645,7 @@ public final class MTTerrainRenderer {
             encoder.setRenderPipelineState(waterPipeline)
             encoder.setDepthStencilState(waterDepthState)
             bindUniforms(encoder, slot: waterSlot)
-            var alpha = waterAlpha
-            encoder.setFragmentBytes(&alpha, length: MemoryLayout<Float>.stride, index: 2)
+            // v1.1.0: alpha buffer(2) removed — opacity comes from waterParams.
             if let wpb = waterParamsBuffer {
                 encoder.setFragmentBuffer(wpb, offset: 0, index: 3)
             }
@@ -861,6 +873,10 @@ public final class MTTerrainRenderer {
     #endif
     private var depthState: MTLDepthStencilState!
     private var waterDepthState: MTLDepthStencilState!
+    /// Cached depth texture for the reflection pass (renderReflection).
+    /// Reused across calls; only recreated when the size changes.
+    private var reflectionDepthTexture: MTLTexture?
+    private var reflectionDepthSize: (width: Int, height: Int) = (0, 0)
 
     private var viewProj = matrix_identity_float4x4
     private var cameraPos = SIMD3<Float>(0, 0, 0)
@@ -868,7 +884,7 @@ public final class MTTerrainRenderer {
     private var lastCenter: MTChunkCoord?
     private var lastRadius: Int?
     private var lastConfigVersion: UInt64 = 0
-    private let waterAlpha: Float = 0.82
+    // v1.1.0: removed (opacity now comes from waterParamsBuffer).
     private let startTime = Date()
 
     // Triple-buffered uniforms; two slots per frame (terrain + water).

@@ -74,7 +74,7 @@ float3 skyColor(float3 viewDir, float sunElevation) {
     float3 horizon = mix(nightHorizon, dayHorizon, dayAmt);
     horizon = mix(horizon, duskHorizon, duskAmt);
 
-    float t = pow(clamp(viewDir.y, 0.0, 1.0), 0.55);
+    float t = sqrt(clamp(viewDir.y, 0.0, 1.0));
     float3 col = mix(horizon, zenith, t);
     // Below the horizon: darken toward ground haze. The terrain and water
     // normally cover this region; this only shows at grazing angles.
@@ -145,8 +145,12 @@ fragment float4 sky_fragment(MTSkyVaryings in [[stage_in]],
     float cosA = dot(viewDir, sunDir);
     float sunVis = smoothstep(-0.06, 0.02, elev);
     float disc = smoothstep(0.9992, 0.9997, cosA) * sunVis;
-    float glow = (pow(max(cosA, 0.0), 350.0) * 0.6
-                + pow(max(cosA, 0.0),  24.0) * 0.18) * sunVis;
+    // v1.1.0: early-out — pow() only matters near the sun disc.
+    float glow = 0.0;
+    if (cosA > 0.7) {
+        glow = (pow(max(cosA, 0.0), 350.0) * 0.6
+              + pow(max(cosA, 0.0),  24.0) * 0.18) * sunVis;
+    }
 
     // Sun tint follows the sky: white at noon, orange at sunset.
     float3 sunTint = mix(float3(1.0, 0.45, 0.15), float3(1.0, 0.97, 0.90), dayAmt);
