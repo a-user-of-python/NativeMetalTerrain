@@ -103,7 +103,8 @@ struct TerrainView: UIViewRepresentable {
         #endif
         view.device = MTLCreateSystemDefaultDevice()
         view.delegate = context.coordinator
-        view.preferredFramesPerSecond = uncappedFPS ? 0 : 60
+        // v1.2.1: 120 for uncapped (0 = black screen bug on some iOS versions).
+        view.preferredFramesPerSecond = uncappedFPS ? 120 : 60
         view.isPaused = false
         view.enableSetNeedsDisplay = false
         view.colorPixelFormat = .bgra8Unorm
@@ -117,8 +118,8 @@ struct TerrainView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
-        // v1.2.0: apply uncapped FPS changes live.
-        uiView.preferredFramesPerSecond = uncappedFPS ? 0 : 60
+        // v1.2.1: 120 for uncapped (0 = black screen bug on some iOS versions).
+        uiView.preferredFramesPerSecond = uncappedFPS ? 120 : 60
         context.coordinator.sync(with: self)
     }
 

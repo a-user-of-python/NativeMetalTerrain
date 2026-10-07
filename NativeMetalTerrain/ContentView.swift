@@ -60,6 +60,14 @@ struct ContentView: View {
     @State private var ramMB: Double = 0
     @State private var cpuPercent: Double = 0
     @State private var gpuMB: Double = 0
+    /// v1.2.1: estimated wattage.
+    @State private var wattage: Double = 0
+    /// v1.2.1: stats overlay toggles (synced from Settings).
+    @AppStorage("showCPU") private var showCPU = false
+    @AppStorage("showGPU") private var showGPU = false
+    @AppStorage("showMemory") private var showMemory = false
+    @AppStorage("showWattage") private var showWattage = false
+    @AppStorage("showFPSGraph") private var showFPSGraph = false
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
     /// Debug car (separate debug panel, app-only).
@@ -273,12 +281,15 @@ struct ContentView: View {
                     // Poll from timer (not render loop) to avoid
                     // "modifying state during view update".
                     if let r = terrainRenderer { fps = r.currentFPS }
-                    if showStats {
+                    // v1.2.1: stats polled when any overlay is enabled.
+                    if showStats || showCPU || showGPU || showMemory || showWattage || showFPSGraph {
                         ramMB = Self.appMemoryMB()
                         cpuPercent = Self.appCPUPercent()
                         if let r = terrainRenderer {
                             gpuMB = r.gpuAllocatedMB
                         }
+                        // v1.2.1: wattage estimated from CPU+GPU load.
+                        wattage = Self.estimateWattage(cpuPercent: cpuPercent, gpuMB: gpuMB)
                     }
                 }
 
@@ -431,28 +442,16 @@ struct ContentView: View {
                     }
                 }
 
-                // v1.0.1: stats overlay (RAM/CPU/GPU) toggleable via `stats` command
-                if showStats {
-                    VStack {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(String(format: "RAM %.0f MB", ramMB))
-                                Text(String(format: "CPU %.0f%%", cpuPercent))
-                                Text(String(format: "GPU %.0f MB", gpuMB))
-                                Text(String(format: "FPS %.0f", fps))
-                            }
-                            .font(.headline)
-                            .foregroundColor(.green)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.black.opacity(0.7))
-                            .cornerRadius(8)
-                            Spacer()
-                        }
-                        .padding(.top, 50)
-                        .padding(.leading, 12)
-                        Spacer()
-                    }
+                // v1.2.1: stats overlay with graphs (Settings toggles).
+                // Legacy `stats` command still works via showStats.
+                if showStats || showCPU || showGPU || showMemory || showWattage || showFPSGraph {
+                    StatsOverlay(
+                        cpuPercent: cpuPercent,
+                        gpuMB: gpuMB,
+                        ramMB: ramMB,
+                        wattage: wattage,
+                        fps: fps
+                    )
                 }
 
                 // Classic UI (devtools mode via /devtools command)
@@ -782,6 +781,18 @@ struct ContentView: View {
         }
         vm_deallocate(mach_task_self_, vm_address_t(bitPattern: threadList), vm_size_t(threadCount) * vm_size_t(MemoryLayout<thread_act_t>.size))
         return total
+    }
+
+    /// v1.2.1: Estimates power draw in watts from CPU and GPU load.
+    /// iOS has no public wattage API; this is a rough estimate based on
+    /// typical iPhone/iPad SoC power curves (idle ~1W, max ~12-15W).
+    static func estimateWattage(cpuPercent: Double, gpuMB: Double) -> Double {
+        // Base idle power + CPU contribution + GPU contribution.
+        // CPU: 0-100% maps to 0-6W. GPU: based on memory allocated as proxy
+        // for load (0-4GB maps to 0-5W).
+        let cpuW = min(cpuPercent / 100.0, 1.0) * 6.0
+        let gpuW = min(gpuMB / 4000.0, 1.0) * 5.0
+        return 1.0 + cpuW + gpuW
     }
 
     /// Copies the current seed into the seed field so the user can tweak

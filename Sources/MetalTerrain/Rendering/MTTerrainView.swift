@@ -78,11 +78,12 @@ public final class MTTerrainView: MTKView {
         clearColor = MTLClearColor(red: 0.04, green: 0.06, blue: 0.11, alpha: 1.0)
     }
 
-    /// v1.2.0: when true, removes the 60fps cap (renders as fast as possible).
+    /// v1.2.0: when true, removes the 60fps cap (renders at up to 120fps).
+    /// v1.2.1: uses 120, not 0 (0 causes black screen on some iOS versions).
     /// On ProMotion displays this can reach 120fps.
     public var uncappedFPS: Bool = false {
         didSet {
-            preferredFramesPerSecond = uncappedFPS ? 0 : 60
+            preferredFramesPerSecond = uncappedFPS ? 120 : 60
         }
     }
 

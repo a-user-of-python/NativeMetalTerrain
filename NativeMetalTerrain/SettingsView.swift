@@ -5,6 +5,12 @@ struct SettingsView: View {
     @AppStorage("metalPreference") private var metalPreferenceRaw = MetalPreference.auto.rawValue
     /// v1.2.0: uncapped FPS preference (persisted).
     @AppStorage("uncappedFPS") private var uncappedFPS = false
+    /// v1.2.1: stats overlay toggles (persisted).
+    @AppStorage("showCPU") private var showCPU = false
+    @AppStorage("showGPU") private var showGPU = false
+    @AppStorage("showMemory") private var showMemory = false
+    @AppStorage("showWattage") private var showWattage = false
+    @AppStorage("showFPSGraph") private var showFPSGraph = false
 
     var metalPreference: Binding<MetalPreference> {
         Binding(
@@ -30,6 +36,17 @@ struct SettingsView: View {
                 Toggle("Uncapped FPS", isOn: $uncappedFPS)
                     .font(.title2)
                 Text("Removes the 60fps limit. Higher frame rates, more battery drain.")
+                    .font(.body)
+                    .foregroundColor(.gray)
+            }
+
+            Section(header: Text("Performance Overlay").font(.title2)) {
+                Toggle("CPU", isOn: $showCPU).font(.title2)
+                Toggle("GPU Memory", isOn: $showGPU).font(.title2)
+                Toggle("RAM", isOn: $showMemory).font(.title2)
+                Toggle("Wattage (est.)", isOn: $showWattage).font(.title2)
+                Toggle("FPS Graph", isOn: $showFPSGraph).font(.title2)
+                Text("Live stats with graphs, shown over the 3D view.")
                     .font(.body)
                     .foregroundColor(.gray)
             }
