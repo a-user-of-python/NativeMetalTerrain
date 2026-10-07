@@ -287,6 +287,8 @@ public enum MTMeshBuilder {
         // Hoist biomes once: biomeAt does 2 locks + array concat per call,
         // and groundColor calls it up to 3x per vertex (190K allocs/chunk).
         let biomes = world.allBiomes
+        // v1.3.0-refine: hoist volcano vents for volcanic rock coloring.
+        let vents = world.volcanoVents
         let heightScale = cfg.heightScale
         // H3: hoist noise pair for lock-free border normal sampling.
         // world.heightAt() takes 2 locks per call; we do ~1000 border
@@ -345,7 +347,9 @@ public enum MTMeshBuilder {
 
                 let wy = height * heightScale
 
-                let (rgb, material) = groundColor(height: height, normalY: normal.y, biomes: biomes)
+                let (rgb, material) = groundColor(height: height, normalY: normal.y,
+                                                   biomes: biomes, wx: wx, wz: wz,
+                                                   vents: vents)
                 vertices.append(MTVertex(
                     position: SIMD3<Float>(wx, wy, wz),
                     normal: normal,
@@ -436,7 +440,61 @@ public enum MTMeshBuilder {
         return biomes.last ?? biomes[0]
     }
 
+    /// v1.3.0-refine: volcanic terrain coloring. Near volcano vents the
+    /// terrain blends toward dark basalt/ash, overriding snow caps on the
+    /// cone. `wx/wz` = world position of the vertex.
     private static func groundColor(
+        height h: Float,
+        normalY: Float,
+        biomes: [MTBiome],
+        wx: Float, wz: Float,
+        vents: [MTTerrainWorld.MTVolcanoVent]
+    ) -> (SIMD3<Float>, Float) {
+        let volcT = volcanicBlend(wx: wx, wz: wz, vents: vents)
+        // Strong volcanic zone: pure basalt, no snow cap on the cone.
+        if volcT > 0.75 {
+            return (basaltColor(wx: wx, wz: wz), 1)
+        }
+        var (color, material) = baseGroundColor(height: h, normalY: normalY,
+                                                biomes: biomes)
+        if volcT > 0 {
+            let basalt = basaltColor(wx: wx, wz: wz)
+            color = mix(color, basalt, volcT * 0.9)
+            if volcT > 0.45 { material = 1 }  // rock material on slopes
+        }
+        return (color, material)
+    }
+
+    /// 0...1 volcanic influence: 1 at the vent, 0 beyond 500m.
+    private static func volcanicBlend(wx: Float, wz: Float,
+                                      vents: [MTTerrainWorld.MTVolcanoVent]) -> Float {
+        if vents.isEmpty { return 0 }
+        var minD = Float.greatestFiniteMagnitude
+        for v in vents {
+            let dx = wx - v.position.x, dz = wz - v.position.y
+            let d = sqrt(dx * dx + dz * dz)
+            if d < minD { minD = d }
+        }
+        if minD >= 500 { return 0 }
+        return 1 - smooth01(minD / 500)
+    }
+
+    /// Dark basalt with ash variation (hash of world pos for texture).
+    private static func basaltColor(wx: Float, wz: Float) -> SIMD3<Float> {
+        // Deterministic hash -> 0...1 (no noise eval needed per vertex).
+        let n = fract(sin(wx * 12.9898 + wz * 78.233) * 43758.5453)
+        let v = SIMD3<Float>(0.10, 0.095, 0.105) * (0.8 + 0.4 * n)
+        // Occasional ash patches (lighter gray).
+        let ash = fract(sin(wx * 3.7 + wz * 9.1) * 24634.6345)
+        if ash > 0.93 {
+            return SIMD3<Float>(0.32, 0.30, 0.29) * (0.85 + 0.3 * n)
+        }
+        return v
+    }
+
+    private static func fract(_ x: Float) -> Float { x - floor(x) }
+
+    private static func baseGroundColor(
         height h: Float,
         normalY: Float,
         biomes: [MTBiome]

@@ -45,11 +45,12 @@ struct HeightmapParams {
 };
 
 // v1.3.0: volcano vent for crater carving. Must match the Swift
-// MTVolcanoVentGPU layout (float2 + float + float = 16 bytes).
+// MTVolcanoVentGPU layout (float2 + float + float + float = 20 bytes).
 struct MTVolcanoVentGPU {
     float2 pos;      // world XZ of crater center
     float  radius;   // crater radius, world units
     float  depth;    // normalized depth subtracted at center
+    float  peakHeight; // v1.3.0-refine: normalized peak height (cone shaping)
 };
 
 // MARK: - Perlin gradient noise (port of MTPerlinNoise.noise)
@@ -252,10 +253,19 @@ kernel void mtHeightmapKernel(
     float y = p.z0 + (float)gid.y * p.step;
     float h = heightSample(x, y, p, perm, warpPerm, lut);
     // v1.3.0: carve volcano craters. Wobbled edge for a natural look.
+    // v1.3.0-refine: volcanic cone shaping first (regularizes slopes
+    // toward an idealized cone within 4x crater radius), then carve.
     for (uint v = 0; v < p.ventCount; v++) {
         float2 d = float2(x, y) - vents[v].pos;
         float dist = length(d);
         float r = vents[v].radius;
+        float coneR = r * 4.0;
+        if (dist < coneR) {
+            float t = dist / coneR;
+            float coneH = vents[v].peakHeight * pow(1.0 - t, 1.25);
+            float w = 0.45 * (1.0 - t) * (1.0 - t);
+            h = h * (1.0 - w) + coneH * w;
+        }
         if (dist < r * 1.35) {
             float ang = atan2(d.y, d.x);
             float wobble = 1.0 + 0.22 * sin(ang * 3.0 + vents[v].pos.x)

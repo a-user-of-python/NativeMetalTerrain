@@ -20,11 +20,12 @@ public struct MTLavaParticle {
     public var size: Float      // world units (billboard half-extent)
 }
 
-/// A landed lava deposit: a glowing pool on the terrain that fades.
+/// A landed lava deposit: a glowing pool on the terrain that cools over
+/// 30-60 seconds. Lethal while hot (heat > 0.3), safe once cooled black.
 public struct MTLavaDeposit {
     public var position: SIMD3<Float>  // world, y = terrain surface
     public var radius: Float
-    public var life: Float      // seconds of glow remaining
+    public var life: Float      // seconds of heat remaining
     public var maxLife: Float
 }
 
@@ -41,7 +42,7 @@ public struct MTLavaRenderInstance {
 /// Simulates volcano eruptions and lava. Owned by MTTerrainRenderer.
 public final class MTLavaParticles {
     public static let maxParticles = 200
-    public static let maxDeposits = 60
+    public static let maxDeposits = 100
 
     private(set) public var particles: [MTLavaParticle] = []
     private(set) public var deposits: [MTLavaDeposit] = []
@@ -55,6 +56,8 @@ public final class MTLavaParticles {
     private var ventStates: [VentState] = []
     private var rng: MTSeededRandom
     private var frame = 0
+    /// Cached vents for pool rendering / pool lethality (updated in update()).
+    private var poolVents: [MTTerrainWorld.MTVolcanoVent] = []
 
     public init(seed: UInt64) {
         // Domain-separated from terrain/structure noise.
@@ -67,6 +70,7 @@ public final class MTLavaParticles {
         particles.removeAll(keepingCapacity: true)
         deposits.removeAll(keepingCapacity: true)
         ventStates.removeAll(keepingCapacity: true)
+        poolVents.removeAll(keepingCapacity: true)
     }
 
     /// Advance the simulation. Call once per frame from the renderer.
@@ -79,6 +83,7 @@ public final class MTLavaParticles {
         let dt = min(max(dt, 0), 0.1)
         frame &+= 1
         let vents = world.volcanoVents
+        poolVents = vents
         // Rebuild vent state when the vent set changes (seed/config change).
         if ventStates.count != vents.count {
             ventStates = vents.map { _ in
@@ -163,7 +168,9 @@ public final class MTLavaParticles {
     }
 
     /// Is there lethal lava at a world position? Blobs kill within 1.3m
-    /// (must actually touch), deposits within their radius.
+    /// (must actually touch). Deposits kill within their radius only while
+    /// hot (heat > 0.3) — cooled black lava is safe. Crater lava pools
+    /// are always lethal.
     public func isLavaAt(_ p: SIMD3<Float>) -> Bool {
         for b in particles {
             let dx = b.position.x - p.x
@@ -172,10 +179,22 @@ public final class MTLavaParticles {
             if dx * dx + dy * dy + dz * dz < 1.3 * 1.3 { return true }
         }
         for dep in deposits {
+            let heat = dep.life / dep.maxLife
+            guard heat > 0.3 else { continue }  // cooled lava is safe
             let dx = dep.position.x - p.x
             let dz = dep.position.z - p.z
             if dx * dx + dz * dz < dep.radius * dep.radius
                 && abs(p.y - dep.position.y) < 3.0 {
+                return true
+            }
+        }
+        // Crater lava pools: always lethal.
+        for v in poolVents {
+            let dx = p.x - v.position.x
+            let dz = p.z - v.position.y
+            let r = v.craterRadius * 0.7
+            if dx * dx + dz * dz < r * r
+                && p.y < v.ventY + 4.0 && p.y > v.ventY - 12.0 {
                 return true
             }
         }
@@ -195,6 +214,27 @@ public final class MTLavaParticles {
             out.append(MTLavaRenderInstance(
                 position: dep.position, size: dep.radius, kind: 1,
                 heat: max(dep.life / dep.maxLife, 0)))
+        }
+        return out
+    }
+
+    /// Lava pool instances: one glowing disc per nearby vent, rendered
+    /// with the deposit shader. Heat pulses for a bubbling look.
+    /// Call each frame and append to `renderInstances()` output.
+    public func poolInstances(time: Float,
+                              cameraTarget: SIMD2<Float>) -> [MTLavaRenderInstance] {
+        var out: [MTLavaRenderInstance] = []
+        for (i, v) in poolVents.enumerated() {
+            let dx = v.position.x - cameraTarget.x
+            let dz = v.position.y - cameraTarget.y
+            if dx * dx + dz * dz > 3000 * 3000 { continue }
+            // Bubbling pulse: 0.72...1.0 heat oscillation, phase per vent.
+            let heat = 0.86 + 0.14 * sin(time * 2.2 + Float(i) * 2.1)
+            out.append(MTLavaRenderInstance(
+                position: SIMD3<Float>(v.position.x, v.ventY + 0.3, v.position.y),
+                size: v.craterRadius * 0.7,
+                kind: 1,
+                heat: heat))
         }
         return out
     }
@@ -219,10 +259,12 @@ public final class MTLavaParticles {
 
     private func landBlob(_ p: MTLavaParticle, groundY: Float) {
         guard deposits.count < Self.maxDeposits else { return }
-        let life: Float = 7 + rng.nextFloat() * 4
+        // v1.3.0-refine: deposits persist 30-60s, cooling from glowing
+        // yellow-white to black. Lethal while hot (heat > 0.3).
+        let life: Float = 30 + rng.nextFloat() * 30
         deposits.append(MTLavaDeposit(
-            position: SIMD3<Float>(p.position.x, groundY + 0.25, p.position.z),
-            radius: 1.8 + rng.nextFloat() * 1.6,
+            position: SIMD3<Float>(p.position.x, groundY + 0.35, p.position.z),
+            radius: 2.0 + rng.nextFloat() * 1.8,
             life: life, maxLife: life))
     }
 }

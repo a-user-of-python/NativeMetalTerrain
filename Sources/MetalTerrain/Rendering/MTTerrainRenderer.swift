@@ -389,6 +389,7 @@ public final class MTTerrainRenderer {
                 ldt = 1.0 / 60.0
             }
             lastLavaTime = now
+            lavaTime += ldt
             lava.update(dt: ldt, world: world, cameraTarget: cameraTarget)
         }
         // If the user replaced `world.config`, drop stale chunk meshes and
@@ -702,17 +703,20 @@ public final class MTTerrainRenderer {
         }
 
         // v1.3.0: volcano lava billboards (additive, emissive).
+        // v1.3.0-refine: crater lava pools appended (bubbling discs).
         // Skipped for reflections; depth-tested but doesn't write depth.
         if includeStructures, let lavaPipeline = lavaPipeline,
            let lava = lava {
-            let instances = lava.renderInstances()
+            var instances = lava.renderInstances()
+            instances.append(contentsOf: lava.poolInstances(
+                time: lavaTime, cameraTarget: lastCameraTarget))
             if !instances.isEmpty {
                 // Reusable instance buffer (avoids per-frame allocation).
                 let need = instances.count * 32
                 if lavaInstanceBuffer == nil
                     || (lavaInstanceBuffer?.length ?? 0) < need {
                     lavaInstanceBuffer = device.makeBuffer(
-                        length: 260 * 32, options: .storageModeShared)
+                        length: 320 * 32, options: .storageModeShared)
                 }
                 if let ib = lavaInstanceBuffer {
                     let ptr = ib.contents().assumingMemoryBound(to: SIMD4<Float>.self)
@@ -1077,7 +1081,10 @@ public final class MTTerrainRenderer {
     private var lava: MTLavaParticles?
     /// Last lava sim time (for dt in update).
     private var lastLavaTime: Double?
-    /// v1.3.0: reusable lava instance buffer (260 max × 32 bytes).
+    /// v1.3.0-refine: accumulated lava clock (drives pool bubbling pulse).
+    private var lavaTime: Float = 0
+    /// v1.3.0: reusable lava instance buffer (320 max × 32 bytes:
+    /// 200 blobs + 100 deposits + 3 pools + headroom).
     private var lavaInstanceBuffer: MTLBuffer?
     // Generation counter: bumped by invalidateCaches(). Background builds
     // capture the generation at dispatch; if it changed by completion,

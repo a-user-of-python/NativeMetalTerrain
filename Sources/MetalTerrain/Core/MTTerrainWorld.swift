@@ -274,6 +274,8 @@ public final class MTTerrainWorld {
 
     /// Carves volcano craters into a chunk heightmap (in place).
     /// The crater edge is wobbled by angle so it looks natural, not circular.
+    /// v1.3.0-refine: also shapes the volcano into a regular cone within
+    /// 4x crater radius (steeper, more natural volcanic profile).
     /// `x0/z0` = chunk origin (world), `step` = texel spacing, `res` = grid size.
     public func carveCraters(into heights: inout [UInt16],
                              x0: Double, z0: Double, step: Double, res: Int) {
@@ -281,11 +283,12 @@ public final class MTTerrainWorld {
         guard !vents.isEmpty, heights.count == res * res else { return }
         for v in vents {
             let vx = Double(v.position.x), vz = Double(v.position.y)
-            // Skip vents far from this chunk.
-            let margin = Double(v.craterRadius) * 1.6
+            let r = Double(v.craterRadius)
+            let coneR = r * 4.0
+            // Skip vents far from this chunk (cone region + margin).
+            let margin = coneR * 1.05
             if vx < x0 - margin || vx > x0 + Double(res - 1) * step + margin { continue }
             if vz < z0 - margin || vz > z0 + Double(res - 1) * step + margin { continue }
-            let r = Double(v.craterRadius)
             let depth = Double(v.craterDepth)
             let rTex = Int(ceil(margin / step))
             let cx = (vx - x0) / step, cz = (vz - z0) / step
@@ -293,25 +296,34 @@ public final class MTTerrainWorld {
             let iz0 = max(0, Int(floor(cz)) - rTex), iz1 = min(res - 1, Int(ceil(cz)) + rTex)
             // Wobble phases match the GPU kernel (pos used directly).
             let ph1 = Double(v.position.x), ph2 = Double(v.position.y)
+            let peakH = Double(v.peakHeight)
             for iz in iz0...iz1 {
                 for ix in ix0...ix1 {
                     let wx = x0 + Double(ix) * step
                     let wz = z0 + Double(iz) * step
                     let dx = wx - vx, dz = wz - vz
                     let dist = sqrt(dx * dx + dz * dz)
-                    if dist >= r * 1.35 { continue }
-                    let ang = atan2(dz, dx)
-                    let wobble = 1.0 + 0.22 * sin(ang * 3 + ph1) * sin(ang * 5 + ph2)
-                    let t = min(dist / (r * wobble), 1.0)
-                    // Bowl profile; slight rim lift just outside the crater.
-                    var delta: Double
-                    if t < 1.0 {
-                        delta = -(1.0 - t * t) * depth
-                    } else {
-                        delta = 0.15 * depth * (1.0 - (t - 1.0) / 0.35)
-                    }
+                    if dist >= coneR { continue }
                     let idx = iz * res + ix
-                    var h = Double(heights[idx]) / 65535.0 + delta
+                    var h = Double(heights[idx]) / 65535.0
+                    // Cone shaping: blend toward idealized cone profile.
+                    do {
+                        let t = dist / coneR
+                        let coneH = peakH * pow(1.0 - t, 1.25)
+                        let w = 0.45 * (1.0 - t) * (1.0 - t)
+                        h = h * (1.0 - w) + coneH * w
+                    }
+                    // Crater carving (wobbled edge).
+                    if dist < r * 1.35 {
+                        let ang = atan2(dz, dx)
+                        let wobble = 1.0 + 0.22 * sin(ang * 3 + ph1) * sin(ang * 5 + ph2)
+                        let t = min(dist / (r * wobble), 1.0)
+                        if t < 1.0 {
+                            h += -(1.0 - t * t) * depth
+                        } else {
+                            h += 0.15 * depth * (1.0 - (t - 1.0) / 0.35)
+                        }
+                    }
                     h = min(max(h, 0), 1)
                     heights[idx] = UInt16((h * 65535.0).rounded())
                 }

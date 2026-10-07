@@ -44,11 +44,12 @@ private struct HeightmapParams {
 }
 
 /// GPU vent layout. Must match `MTVolcanoVentGPU` in MTHeightmapCompute.metal
-/// (float2 + float + float = 16 bytes).
+/// (float2 + float + float + float = 20 bytes).
 private struct MTVolcanoVentGPU {
     var pos: SIMD2<Float>
     var radius: Float
     var depth: Float
+    var peakHeight: Float
 }
 
 /// GPU heightmap generator. Internal: owned by the renderer, handed to
@@ -189,12 +190,12 @@ final class MTHeightmapCompute {
         // the kernel loops zero times.
         let gpuVents = vents.prefix(8).map {
             MTVolcanoVentGPU(pos: $0.position, radius: $0.craterRadius,
-                             depth: $0.craterDepth)
+                             depth: $0.craterDepth, peakHeight: $0.peakHeight)
         }
         var ventArray = Array(gpuVents)
         if ventArray.isEmpty {
             ventArray.append(MTVolcanoVentGPU(pos: SIMD2<Float>(0, 0),
-                                             radius: 0, depth: 0))
+                                             radius: 0, depth: 0, peakHeight: 0))
         }
 
         let outLength = res * res * MemoryLayout<UInt16>.stride
