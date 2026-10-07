@@ -116,8 +116,6 @@ struct ContentView: View {
                     carActive: $carActive,
                     simulatorMode: $simulatorMode,
                     uncappedFPS: $uncappedFPS,
-                    avoidVolcanoesOnSpawn: avoidVolcanoes,
-                    onPlayerDeath: { handlePlayerDeath() },
                     onRendererReady: { renderer in
                         // Capture synchronously: this closure was created during
                         // the body evaluation whose rebuildToken value triggered
@@ -203,6 +201,8 @@ struct ContentView: View {
                             }
                         }
                     }
+                    avoidVolcanoesOnSpawn: avoidVolcanoes,
+                    onPlayerDeath: { handlePlayerDeath() }
                 )
                 .ignoresSafeArea()
                 .onAppear {
