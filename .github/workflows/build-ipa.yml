@@ -60,13 +60,6 @@ jobs:
       # ── Standard build (all devices) ──
       - name: Build standard (no signing)
         run: |
-          # v1.2.1: Xcode 26 resolves the local package ".." relative to CWD.
-          # Run from a subdir so ".." points at the repo root (where Package.swift lives).
-          mkdir -p .xctmp && cd .xctmp
-          xcodebuild -resolvePackageDependencies \
-            -project ../NativeMetalTerrain.xcodeproj \
-            -scheme NativeMetalTerrain
-          cd ..
           xcodebuild build \
             -project NativeMetalTerrain.xcodeproj \
             -scheme NativeMetalTerrain \
@@ -95,11 +88,6 @@ jobs:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) M3_FEATURES
           MTL_OTHER_CFLAGS = $(inherited) -DM3_FEATURES
           EOF
-          mkdir -p .xctmp && cd .xctmp
-          xcodebuild -resolvePackageDependencies \
-            -project ../NativeMetalTerrain.xcodeproj \
-            -scheme NativeMetalTerrain
-          cd ..
           xcodebuild build \
             -project NativeMetalTerrain.xcodeproj \
             -scheme NativeMetalTerrain \
