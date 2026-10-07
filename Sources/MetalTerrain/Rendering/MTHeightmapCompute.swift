@@ -17,21 +17,21 @@ import Foundation
 
 /// Parameter block for `mtHeightmapKernel`.
 /// Layout must match `HeightmapParams` in MTHeightmapCompute.metal exactly:
-/// 13 doubles (8-byte aligned) followed by 8 uints (4-byte aligned).
+/// 13 floats followed by 8 uints.
 private struct HeightmapParams {
-    var x0: Double
-    var z0: Double
-    var step: Double
-    var baseFreq: Double
-    var lacunarity: Double
-    var gain: Double
-    var baseAmplitude: Double
-    var warpStrength: Double
-    var warpScale: Double
-    var continentFreq: Double
-    var mtnFreq: Double
-    var riverFreq: Double
-    var mountainSharpness: Double
+    var x0: Float
+    var z0: Float
+    var step: Float
+    var baseFreq: Float
+    var lacunarity: Float
+    var gain: Float
+    var baseAmplitude: Float
+    var warpStrength: Float
+    var warpScale: Float
+    var continentFreq: Float
+    var mtnFreq: Float
+    var riverFreq: Float
+    var mountainSharpness: Float
     var res: UInt32
     var baseOctaves: UInt32
     var continentOctaves: UInt32
@@ -99,6 +99,24 @@ final class MTHeightmapCompute {
                          seed: UInt64,
                          noise: MTPerlinNoise,
                          warpNoise: MTPerlinNoise) -> [UInt16]? {
+        guard let outBuffer = generateHeightsBuffer(
+                x0: x0, z0: z0, step: step, res: res, field: field,
+                seed: seed, noise: noise, warpNoise: warpNoise) else {
+            return nil
+        }
+        let ptr = outBuffer.contents().assumingMemoryBound(to: UInt16.self)
+        return Array(UnsafeBufferPointer(start: ptr, count: res * res))
+    }
+
+    /// GPU dispatch returning the raw height buffer (no CPU readback).
+    /// The buffer holds `res*res` UInt16 heights in `.storageModeShared`
+    /// memory, so callers can read it back or feed it to another kernel.
+    /// Returns nil on any failure — callers fall back to the CPU path.
+    func generateHeightsBuffer(x0: Double, z0: Double, step: Double, res: Int,
+                               field: MTHeightFieldConfig,
+                               seed: UInt64,
+                               noise: MTPerlinNoise,
+                               warpNoise: MTPerlinNoise) -> MTLBuffer? {
         guard res >= 2 else { return nil }
 
         // Refresh the permutation-table buffers when the seed changes.
@@ -182,8 +200,6 @@ final class MTHeightmapCompute {
         // Synchronous: generateChunk already runs on a background queue.
         commandBuffer.waitUntilCompleted()
         guard commandBuffer.status == .completed else { return nil }
-
-        let ptr = outBuffer.contents().assumingMemoryBound(to: UInt16.self)
-        return Array(UnsafeBufferPointer(start: ptr, count: res * res))
+        return outBuffer
     }
 }
