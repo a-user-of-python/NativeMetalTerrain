@@ -158,7 +158,8 @@ struct TerrainView: UIViewRepresentable {
             dragMode: .constant(.orbit),
             cameraMode: .constant(.walk), playerHeight: .constant(2),
             moveInput: .constant(SIMD2<Float>(0, 0)),
-            carActive: .constant(false), simulatorMode: .constant(false)
+            carActive: .constant(false), simulatorMode: .constant(false),
+            uncappedFPS: .constant(false)
         )
         private var device: MTLDevice?
         private var world: MTTerrainWorld?
