@@ -157,7 +157,14 @@ public final class MTTerrainRenderer {
     /// and overrides the sun position/color. Default false: manual
     /// `sunAzimuth`/`sunElevation` control keeps working as before.
     public var timeOfDayEnabled: Bool = false {
-        didSet { if timeOfDayEnabled { applyTimeOfDay() } }
+        didSet {
+            if timeOfDayEnabled {
+                applyTimeOfDay()
+            } else {
+                // v1.1.3: clear fog override when time animation is off.
+                fogColorOverride = nil
+            }
+        }
     }
     /// Game-hours advanced per real minute (0...60). Default 1.0.
     public var timeOfDaySpeed: Float = 1.0 {
@@ -167,6 +174,8 @@ public final class MTTerrainRenderer {
     /// from `timeOfDay` when `timeOfDayEnabled`; settable manually otherwise.
     /// Default matches the previous hardcoded warm glint.
     public var sunColor: SIMD3<Float> = SIMD3<Float>(1.0, 0.98, 0.92)
+    /// v1.1.3: when set, overrides cfg.fogColor (used by applyTimeOfDay).
+    public var fogColorOverride: SIMD3<Float>?
     /// Last measured FPS (written by the demo's render loop, polled by UI).
     public var currentFPS: Double = 0
     /// GPU memory currently allocated by Metal, in MB (for stats overlay).
@@ -218,8 +227,34 @@ public final class MTTerrainRenderer {
         let s = sin(2 * Float.pi * (t - 6) / 24)
         sunElevation = s >= 0 ? s * 70 : s * 30
         sunColor = Self.sunColorForElevation(sunElevation)
+        // v1.1.3: fog follows the sky — dark at night, warm at dusk.
+        fogColorOverride = Self.fogColorForElevation(sunElevation)
         // The skybox reads sunElevation every frame (day/dusk/night
         // gradients), so it follows automatically.
+    }
+
+    /// Fog color for a given sun elevation: light blue at day, warm at
+    /// dusk, dark blue-black at night.
+    public static func fogColorForElevation(_ elevation: Float) -> SIMD3<Float> {
+        let day = SIMD3<Float>(0.65, 0.75, 0.85)   // light blue
+        let dusk = SIMD3<Float>(0.85, 0.55, 0.45)  // warm orange-pink
+        let night = SIMD3<Float>(0.02, 0.03, 0.06)  // dark blue-black
+        let smooth: (Float) -> Float = { x in
+            let c = min(max(x, 0), 1)
+            return c * c * (3 - 2 * c)
+        }
+        if elevation >= 0 {
+            let k = smooth(elevation / 70)
+            // Blend dusk -> day as sun rises
+            let lowElev = SIMD3<Float>(0.75, 0.6, 0.55)
+            if elevation < 15 {
+                return dusk + (lowElev - dusk) * smooth(elevation / 15)
+            }
+            return lowElev + (day - lowElev) * smooth((elevation - 15) / 55)
+        } else {
+            let k = smooth(-elevation / 30)
+            return dusk + (night - dusk) * k
+        }
     }
 
     /// Sun tint for a given elevation in degrees: warm orange at the
@@ -1218,7 +1253,7 @@ public final class MTTerrainRenderer {
             viewProj: viewProj ?? self.viewProj,
             model: model,
             cameraPos: SIMD4<Float>(cameraPos ?? self.cameraPos, 1),
-            fogColor: SIMD4<Float>(cfg.fogColor, density),
+            fogColor: SIMD4<Float>(fogColorOverride ?? cfg.fogColor, density),
             lightDir: SIMD4<Float>(normalize(sunDir), cfg.ambientIntensity),
             misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0,
                                wireframe ? 1 : 0, detailAmount),
