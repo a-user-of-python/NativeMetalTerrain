@@ -11,6 +11,9 @@ struct ContentView: View {
     @State private var seedText = "1337"
     @State private var seed: UInt64 = 1337
     @State private var rebuildToken = 0
+    /// v1.3.0: lava death — big "YOU DIED" banner + volcano-safe respawn.
+    @State private var showDiedBanner = false
+    @State private var avoidVolcanoes = false
     @State private var lastRegenerateTime: Double = 0
     @State private var preset: BiomePreset = .default
     @State private var structuresEnabled = true
@@ -113,6 +116,8 @@ struct ContentView: View {
                     carActive: $carActive,
                     simulatorMode: $simulatorMode,
                     uncappedFPS: $uncappedFPS,
+                    avoidVolcanoesOnSpawn: avoidVolcanoes,
+                    onPlayerDeath: { handlePlayerDeath() },
                     onRendererReady: { renderer in
                         // Capture synchronously: this closure was created during
                         // the body evaluation whose rebuildToken value triggered
@@ -448,6 +453,28 @@ struct ContentView: View {
                     )
                 }
 
+                // v1.3.0: lava death banner — huge type, high contrast.
+                if showDiedBanner {
+                    VStack {
+                        Spacer()
+                        Text("YOU DIED")
+                            .font(.system(size: 72, weight: .black))
+                            .foregroundColor(.red)
+                            .shadow(color: .black, radius: 8)
+                        Text("The lava got you — new world, safe spawn")
+                            .font(.title)
+                            .bold()
+                            .foregroundColor(.white)
+                            .shadow(color: .black, radius: 6)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.45))
+                    .allowsHitTesting(false)
+                }
+
                 // Classic UI (devtools mode via /devtools command)
                 if devtoolsMode {
                 // Show/hide button (top-right, always reachable)
@@ -638,6 +665,21 @@ struct ContentView: View {
     private func showOutput(_ msg: String, isError: Bool) {
         outputMessage = msg
         outputIsError = isError
+    }
+
+    /// v1.3.0: lava death — new random seed, respawn away from volcanoes,
+    /// big banner (large type for visibility).
+    private func handlePlayerDeath() {
+        showDiedBanner = true
+        let newSeed = UInt64.random(in: 1...UInt64.max)
+        seed = newSeed
+        seedText = String(newSeed)
+        avoidVolcanoes = true
+        rebuildToken += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            showDiedBanner = false
+            avoidVolcanoes = false
+        }
     }
 
     /// Save the current world (seed + preset + config) to the store.

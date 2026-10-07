@@ -141,6 +141,206 @@ public final class MTTerrainWorld {
         return SIMD2<Float>(0, 0)
     }
 
+    // MARK: - Volcanoes (v1.3.0)
+
+    /// A volcano vent: a tall, prominent peak that becomes a volcano.
+    public struct MTVolcanoVent {
+        /// World-space XZ of the vent (crater center).
+        public var position: SIMD2<Float>
+        /// Normalized height of the peak (before crater carving).
+        public var peakHeight: Float
+        /// Crater radius in world units.
+        public var craterRadius: Float
+        /// Normalized crater depth (subtracted at the vent center).
+        public var craterDepth: Float
+        /// World-space Y of the vent rim (for lava spawn).
+        public var ventY: Float
+    }
+
+    // Volcano cache, keyed by (seed, configVersion). Guarded by volcanoLock.
+    private let volcanoLock = NSLock()
+    private var cachedVolcanoKey: (UInt64, UInt64)?
+    private var cachedVents: [MTVolcanoVent] = []
+
+    /// Volcano vents for this world. Deterministic per (seed, config):
+    /// tall, prominent peaks become volcanoes (1–3 per world).
+    /// Computed lazily on first access; thread-safe.
+    public var volcanoVents: [MTVolcanoVent] {
+        let key = (seed, configVersion)
+        volcanoLock.lock()
+        if let ck = cachedVolcanoKey, ck.0 == key.0 && ck.1 == key.1 {
+            let v = cachedVents
+            volcanoLock.unlock()
+            return v
+        }
+        volcanoLock.unlock()
+        let vents = computeVolcanoVents()
+        volcanoLock.lock()
+        cachedVolcanoKey = key
+        cachedVents = vents
+        volcanoLock.unlock()
+        return vents
+    }
+
+    /// Finds up to 3 volcano candidates: local maxima above 0.75
+    /// normalized height with topographic prominence (surroundings
+    /// significantly lower), well separated from each other.
+    private func computeVolcanoVents() -> [MTVolcanoVent] {
+        // Coarse grid search. 200m step over ±4000m: 41×41 samples.
+        // Each heightAt is a full noise eval; ~1681 evals one-time.
+        let step: Double = 200
+        let extent: Double = 4000
+        let n = Int(extent * 2 / step) + 1
+        var grid = [Float](repeating: 0, count: n * n)
+        for j in 0..<n {
+            for i in 0..<n {
+                let x = -extent + Double(i) * step
+                let z = -extent + Double(j) * step
+                grid[j * n + i] = heightAt(x: x, z: z)
+            }
+        }
+        struct Peak { var i: Int; var j: Int; var h: Float }
+        var peaks: [Peak] = []
+        // Local maxima strictly above 0.75.
+        for j in 1..<(n - 1) {
+            for i in 1..<(n - 1) {
+                let h = grid[j * n + i]
+                guard h > 0.75 else { continue }
+                var isMax = true
+                for dj in -1...1 {
+                    for di in -1...1 {
+                        if di == 0 && dj == 0 { continue }
+                        if grid[(j + dj) * n + (i + di)] >= h { isMax = false; break }
+                    }
+                    if !isMax { break }
+                }
+                if isMax { peaks.append(Peak(i: i, j: j, h: h)) }
+            }
+        }
+        // Prominence check: the terrain 600m away must be well below the peak.
+        var prominent: [Peak] = []
+        for p in peaks {
+            let px = -extent + Double(p.i) * step
+            let pz = -extent + Double(p.j) * step
+            var ringMin = Float.greatestFiniteMagnitude
+            let ringR: Double = 600
+            for k in 0..<12 {
+                let a = Double(k) * .pi * 2 / 12
+                let h = heightAt(x: px + cos(a) * ringR, z: pz + sin(a) * ringR)
+                if h < ringMin { ringMin = h }
+            }
+            if p.h - ringMin > 0.12 {
+                prominent.append(p)
+            }
+        }
+        // Tallest first; keep up to 3 with ≥2000m separation.
+        prominent.sort { $0.h > $1.h }
+        var chosen: [Peak] = []
+        for p in prominent {
+            let px = -extent + Double(p.i) * step
+            let pz = -extent + Double(p.j) * step
+            var ok = true
+            for c in chosen {
+                let cx = -extent + Double(c.i) * step
+                let cz = -extent + Double(c.j) * step
+                let d = hypot(px - cx, pz - cz)
+                if d < 2000 { ok = false; break }
+            }
+            if ok { chosen.append(p) }
+            if chosen.count >= 3 { break }
+        }
+        // Refine: sample a finer neighborhood to center the vent on the
+        // true peak (the coarse grid can be up to ~140m off).
+        return chosen.map { p in
+            var bx = -extent + Double(p.i) * step
+            var bz = -extent + Double(p.j) * step
+            var bh = p.h
+            for dj in stride(from: -100.0, through: 100.0, by: 50) {
+                for di in stride(from: -100.0, through: 100.0, by: 50) {
+                    let h = heightAt(x: bx + di, z: bz + dj)
+                    if h > bh { bh = h; bx += di; bz += dj }
+                }
+            }
+            let craterRadius = Float(55 + Double(bh) * 40)  // 85–95m
+            return MTVolcanoVent(
+                position: SIMD2<Float>(Float(bx), Float(bz)),
+                peakHeight: bh,
+                craterRadius: craterRadius,
+                craterDepth: 0.035,
+                ventY: worldY(forHeight: bh) - 0.035 * config.heightScale * 0.5
+            )
+        }
+    }
+
+    /// Carves volcano craters into a chunk heightmap (in place).
+    /// The crater edge is wobbled by angle so it looks natural, not circular.
+    /// `x0/z0` = chunk origin (world), `step` = texel spacing, `res` = grid size.
+    public func carveCraters(into heights: inout [UInt16],
+                             x0: Double, z0: Double, step: Double, res: Int) {
+        let vents = volcanoVents
+        guard !vents.isEmpty, heights.count == res * res else { return }
+        for v in vents {
+            let vx = Double(v.position.x), vz = Double(v.position.y)
+            // Skip vents far from this chunk.
+            let margin = Double(v.craterRadius) * 1.6
+            if vx < x0 - margin || vx > x0 + Double(res - 1) * step + margin { continue }
+            if vz < z0 - margin || vz > z0 + Double(res - 1) * step + margin { continue }
+            let r = Double(v.craterRadius)
+            let depth = Double(v.craterDepth)
+            let rTex = Int(ceil(margin / step))
+            let cx = (vx - x0) / step, cz = (vz - z0) / step
+            let ix0 = max(0, Int(floor(cx)) - rTex), ix1 = min(res - 1, Int(ceil(cx)) + rTex)
+            let iz0 = max(0, Int(floor(cz)) - rTex), iz1 = min(res - 1, Int(ceil(cz)) + rTex)
+            // Wobble phases match the GPU kernel (pos used directly).
+            let ph1 = Double(v.position.x), ph2 = Double(v.position.y)
+            for iz in iz0...iz1 {
+                for ix in ix0...ix1 {
+                    let wx = x0 + Double(ix) * step
+                    let wz = z0 + Double(iz) * step
+                    let dx = wx - vx, dz = wz - vz
+                    let dist = sqrt(dx * dx + dz * dz)
+                    if dist >= r * 1.35 { continue }
+                    let ang = atan2(dz, dx)
+                    let wobble = 1.0 + 0.22 * sin(ang * 3 + ph1) * sin(ang * 5 + ph2)
+                    let t = min(dist / (r * wobble), 1.0)
+                    // Bowl profile; slight rim lift just outside the crater.
+                    var delta: Double
+                    if t < 1.0 {
+                        delta = -(1.0 - t * t) * depth
+                    } else {
+                        delta = 0.15 * depth * (1.0 - (t - 1.0) / 0.35)
+                    }
+                    let idx = iz * res + ix
+                    var h = Double(heights[idx]) / 65535.0 + delta
+                    h = min(max(h, 0), 1)
+                    heights[idx] = UInt16((h * 65535.0).rounded())
+                }
+            }
+        }
+    }
+
+    /// Safe spawn that stays away from volcanoes (post-death respawn).
+    /// Falls back to `findSafeSpawn()` when no safe spot is found.
+    public func findSafeSpawnAwayFromVolcanoes(minDistance: Float = 1500) -> SIMD2<Float> {
+        let vents = volcanoVents
+        let seaLevel = config.seaLevel
+        for radius: Double in [0, 200, 400, 800, 1600, 3200] {
+            for angle in stride(from: 0.0, to: 6.28, by: 0.4) {
+                let x = radius * cos(angle)
+                let z = radius * sin(angle)
+                let h = heightAt(x: x, z: z)
+                guard h > seaLevel + 0.05 && h < 0.70 else { continue }
+                var safe = true
+                for v in vents {
+                    let d = hypot(Float(x) - v.position.x, Float(z) - v.position.y)
+                    if d < minDistance { safe = false; break }
+                }
+                if safe { return SIMD2<Float>(Float(x), Float(z)) }
+            }
+        }
+        return findSafeSpawn()
+    }
+
     // MARK: - Biomes
 
     /// Biome for a normalized height. `height` is clamped to [0, 1].
@@ -233,7 +433,9 @@ public final class MTTerrainWorld {
         if let compute = heightmapCompute,
            let gpuHeights = compute.generateHeights(
                x0: x0, z0: z0, step: step, res: res, field: field,
-               seed: currentSeed, noise: noise, warpNoise: warpNoise) {
+               seed: currentSeed, noise: noise, warpNoise: warpNoise,
+               vents: volcanoVents) {
+            // v1.3.0: craters are carved in the GPU kernel (vent buffer).
             var minH: Float = .greatestFiniteMagnitude
             var maxH: Float = -.greatestFiniteMagnitude
             for q in gpuHeights {
@@ -246,16 +448,12 @@ public final class MTTerrainWorld {
         }
 
         var heights = [UInt16](repeating: 0, count: res * res)
-        // M3: track min/max in the fill loop (avoids two extra passes).
         // v1.2.4: parallelize across CPU cores with concurrentPerform.
         // Each row is independent (noise is stateless per-coordinate).
-        var rowMin = [Float](repeating: .greatestFiniteMagnitude, count: res)
-        var rowMax = [Float](repeating: -.greatestFiniteMagnitude, count: res)
+        // v1.3.0: min/max computed after crater carving (single pass below).
         heights.withUnsafeMutableBufferPointer { hbuf in
             DispatchQueue.concurrentPerform(iterations: res) { iz in
                 let wz = z0 + Double(iz) * step
-                var localMin: Float = .greatestFiniteMagnitude
-                var localMax: Float = -.greatestFiniteMagnitude
                 for ix in 0..<res {
                     let wx = x0 + Double(ix) * step
                     let h = mtHeightSampleField(
@@ -263,17 +461,20 @@ public final class MTTerrainWorld {
                         noise: noise, warpNoise: warpNoise)
                     // Quantize to 16-bit (6mm at 400m scale — invisible).
                     hbuf[iz * res + ix] = UInt16((h * 65535.0).rounded())
-                    if h < localMin { localMin = h }
-                    if h > localMax { localMax = h }
                 }
-                rowMin[iz] = localMin
-                rowMax[iz] = localMax
             }
         }
-        let minH = rowMin.min() ?? 0
-        let maxH = rowMax.max() ?? 1
+        // v1.3.0: carve volcano craters, then min/max over carved heights.
+        carveCraters(into: &heights, x0: x0, z0: z0, step: step, res: res)
+        var cmin: Float = .greatestFiniteMagnitude
+        var cmax: Float = -.greatestFiniteMagnitude
+        for q in heights {
+            let h = Float(q) / 65535.0
+            if h < cmin { cmin = h }
+            if h > cmax { cmax = h }
+        }
         return MTChunk(coord: coord, heights: heights, resolution: res,
-                       minHeight: minH, maxHeight: maxH)
+                       minHeight: cmin, maxHeight: cmax)
     }
 
     // MARK: - Structures

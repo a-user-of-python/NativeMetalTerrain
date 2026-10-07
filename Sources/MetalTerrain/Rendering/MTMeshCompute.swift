@@ -105,7 +105,8 @@ final class MTMeshCompute {
         guard let heightsBuf = heightmap.generateHeightsBuffer(
                 x0: x0 - step, z0: z0 - step, step: step, res: pres,
                 field: field, seed: world.seed,
-                noise: noise, warpNoise: warpNoise) else {
+                noise: noise, warpNoise: warpNoise,
+                vents: world.volcanoVents) else {
             return nil
         }
 
