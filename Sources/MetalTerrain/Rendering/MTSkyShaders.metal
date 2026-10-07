@@ -125,8 +125,10 @@ fragment float4 sky_fragment(MTSkyVaryings in [[stage_in]],
         // Coverage: remap noise so cloudAmt controls how much of the sky
         // is covered. Soft edges for a natural look.
         float cover = smoothstep(1.0 - cloudAmt, 1.0 - cloudAmt + 0.45, c);
-        // Fade clouds near the horizon to avoid a hard band.
-        float horizFade = smoothstep(0.0, 0.18, viewDir.y);
+        // Fade clouds near the horizon to avoid a hard band. v1.1.3: fade
+        // completes at y=0.12 (where the planar projection clamps), so the
+        // stretched texture never shows along the render distance limit.
+        float horizFade = smoothstep(0.12, 0.30, viewDir.y);
         // Cloud tint follows the sun: white at noon, orange at dusk, dark at night.
         float duskAmt = clamp(1.0 - fabs(elev + 0.02) / 0.22, 0.0, 1.0) * (1.0 - dayAmt);
         float3 dayCloud   = float3(0.98, 0.99, 1.00);
