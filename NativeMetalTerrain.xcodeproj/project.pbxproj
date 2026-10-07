@@ -11,17 +11,17 @@
 		A30000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000011 /* ContentView.swift */; };
 		A30000000000000000000022 /* TerrainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000012 /* TerrainView.swift */; };
 		A30000000000000000000023 /* ControlPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000013 /* ControlPanel.swift */; };
+		A30000000000000000000026 /* StatsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000016 /* StatsOverlay.swift */; };
 		A30000000000000000000025 /* JoystickView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000015 /* JoystickView.swift */; };
-		A30000000000000000000026 /* CarRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000016 /* CarRenderer.swift */; };
-		A30000000000000000000027 /* DebugPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000017 /* DebugPanel.swift */; };
-		A30000000000000000000028 /* CommandBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000018 /* CommandBar.swift */; };
-		C00000000000000000010003 /* ControlShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* ControlShelf.swift */; };
-		C00000000000000000010002 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* SettingsView.swift */; };
-		C00000000000000000010003 /* StatsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* StatsOverlay.swift */; };
-		C00000000000000000010001 /* WorldsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* WorldsView.swift */; };
-		C00000000000000000010000 /* MainMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000000 /* MainMenu.swift */; };
-		A30000000000000000000029 /* CommandRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000019 /* CommandRegistry.swift */; };
 		A30000000000000000000024 /* MetalTerrain in Frameworks */ = {isa = PBXBuildFile; productRef = A40000000000000000000002 /* MetalTerrain */; };
+		A3000000000000000000027 /* CarRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000028 /* CarRenderer.swift */; };
+		A3000000000000000000029 /* CommandBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000030 /* CommandBar.swift */; };
+		A3000000000000000000031 /* CommandRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000032 /* CommandRegistry.swift */; };
+		A3000000000000000000033 /* ControlShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000034 /* ControlShelf.swift */; };
+		A3000000000000000000035 /* DebugPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000036 /* DebugPanel.swift */; };
+		A3000000000000000000037 /* MainMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000038 /* MainMenu.swift */; };
+		A3000000000000000000039 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000040 /* SettingsView.swift */; };
+		A3000000000000000000041 /* WorldsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000042 /* WorldsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,16 +30,16 @@
 		A30000000000000000000011 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A30000000000000000000012 /* TerrainView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerrainView.swift; sourceTree = "<group>"; };
 		A30000000000000000000013 /* ControlPanel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ControlPanel.swift; sourceTree = "<group>"; };
+		A30000000000000000000016 /* StatsOverlay.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StatsOverlay.swift; sourceTree = "<group>"; };
 		A30000000000000000000015 /* JoystickView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = JoystickView.swift; sourceTree = "<group>"; };
-		A30000000000000000000016 /* CarRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CarRenderer.swift; sourceTree = "<group>"; };
-		A30000000000000000000017 /* DebugPanel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DebugPanel.swift; sourceTree = "<group>"; };
-		A30000000000000000000018 /* CommandBar.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandBar.swift; sourceTree = "<group>"; };
-		C00000000000000000000003 /* ControlShelf.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ControlShelf.swift; sourceTree = "<group>"; };
-		C00000000000000000000002 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		C00000000000000000000003 /* StatsOverlay.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StatsOverlay.swift; sourceTree = "<group>"; };
-		C00000000000000000000001 /* WorldsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WorldsView.swift; sourceTree = "<group>"; };
-		C00000000000000000000000 /* MainMenu.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MainMenu.swift; sourceTree = "<group>"; };
-		A30000000000000000000019 /* CommandRegistry.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandRegistry.swift; sourceTree = "<group>"; };
+		A3000000000000000000028 /* CarRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CarRenderer.swift; sourceTree = "<group>"; };
+		A3000000000000000000030 /* CommandBar.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandBar.swift; sourceTree = "<group>"; };
+		A3000000000000000000032 /* CommandRegistry.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandRegistry.swift; sourceTree = "<group>"; };
+		A3000000000000000000034 /* ControlShelf.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ControlShelf.swift; sourceTree = "<group>"; };
+		A3000000000000000000036 /* DebugPanel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DebugPanel.swift; sourceTree = "<group>"; };
+		A3000000000000000000038 /* MainMenu.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MainMenu.swift; sourceTree = "<group>"; };
+		A3000000000000000000040 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A3000000000000000000042 /* WorldsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WorldsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,16 +77,8 @@
 				A30000000000000000000011 /* ContentView.swift */,
 				A30000000000000000000012 /* TerrainView.swift */,
 				A30000000000000000000013 /* ControlPanel.swift */,
+				A30000000000000000000016 /* StatsOverlay.swift */,
 				A30000000000000000000015 /* JoystickView.swift */,
-				A30000000000000000000016 /* CarRenderer.swift */,
-				A30000000000000000000017 /* DebugPanel.swift */,
-				A30000000000000000000018 /* CommandBar.swift */,
-				C00000000000000000000003 /* ControlShelf.swift */,
-				C00000000000000000000002 /* SettingsView.swift */,
-				C00000000000000000000003 /* StatsOverlay.swift */,
-				C00000000000000000000001 /* WorldsView.swift */,
-				C00000000000000000000000 /* MainMenu.swift */,
-				A30000000000000000000019 /* CommandRegistry.swift */,
 			);
 			path = NativeMetalTerrain;
 			sourceTree = "<group>";
@@ -134,7 +126,7 @@
 			);
 			mainGroup = A10000000000000000000005;
 			packageReferences = (
-				A40000000000000000000001 /* XCLocalSwiftPackageReference "." */,
+				A40000000000000000000001 /* XCLocalSwiftPackageReference ".." */,
 			);
 			productRefGroup = A10000000000000000000006 /* Products */;
 			projectDirPath = "";
@@ -164,17 +156,16 @@
 				A30000000000000000000021 /* ContentView.swift in Sources */,
 				A30000000000000000000022 /* TerrainView.swift in Sources */,
 				A30000000000000000000023 /* ControlPanel.swift in Sources */,
+				A30000000000000000000026 /* StatsOverlay.swift in Sources */,
 				A30000000000000000000025 /* JoystickView.swift in Sources */,
-				A30000000000000000000026 /* CarRenderer.swift in Sources */,
-				A30000000000000000000027 /* DebugPanel.swift in Sources */,
-				A30000000000000000000028 /* CommandBar.swift in Sources */,
-				C00000000000000000010003 /* ControlShelf.swift in Sources */,
-				C00000000000000000010002 /* SettingsView.swift in Sources */,
-				C00000000000000000010003 /* StatsOverlay.swift in Sources */,
-				C00000000000000000010001 /* WorldsView.swift in Sources */,
-				C00000000000000000010000 /* MainMenu.swift in Sources */,
-				A30000000000000000000029 /* CommandRegistry.swift in Sources */,
-			);
+				A3000000000000000000027 /* CarRenderer.swift in Sources */,
+				A3000000000000000000029 /* CommandBar.swift in Sources */,
+				A3000000000000000000031 /* CommandRegistry.swift in Sources */,
+				A3000000000000000000033 /* ControlShelf.swift in Sources */,
+				A3000000000000000000035 /* DebugPanel.swift in Sources */,
+				A3000000000000000000037 /* MainMenu.swift in Sources */,
+				A3000000000000000000039 /* SettingsView.swift in Sources */,
+				A3000000000000000000041 /* WorldsView.swift in Sources */,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
@@ -386,11 +377,11 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A40000000000000000000001 /* XCLocalSwiftPackageReference "." */ = {isa = XCLocalSwiftPackageReference; relativePath = "."; };
+		A40000000000000000000001 /* XCLocalSwiftPackageReference ".." */ = {isa = XCLocalSwiftPackageReference; relativePath = ".."; };
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A40000000000000000000002 /* MetalTerrain */ = {isa = XCSwiftPackageProductDependency; package = A40000000000000000000001 /* XCLocalSwiftPackageReference "." */; productName = MetalTerrain; };
+		A40000000000000000000002 /* MetalTerrain */ = {isa = XCSwiftPackageProductDependency; package = A40000000000000000000001 /* XCLocalSwiftPackageReference ".." */; productName = MetalTerrain; };
 /* End XCSwiftPackageProductDependency section */
 
 	};
