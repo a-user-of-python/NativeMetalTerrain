@@ -146,6 +146,8 @@ vertex MTVaryings terrain_vertex(const device MTVertexIn *vertices [[buffer(0)]]
 }
 
 // Directional NdotL + ambient, then exponential distance fog.
+// v1.3.0: lightDir is pre-normalized on the CPU in writeUniforms —
+// no per-pixel normalize() needed.
 float3 applyLighting(float3 albedo,
                      float3 normal,
                      float3 worldPos,
@@ -153,7 +155,7 @@ float3 applyLighting(float3 albedo,
                      constant MTUniforms &uniforms) {
     float3 n = normalize(normal);
     float3 viewDir = normalize(uniforms.cameraPos.xyz - worldPos);
-    float3 lightDir = normalize(uniforms.lightDir.xyz);
+    float3 lightDir = uniforms.lightDir.xyz;
 
     // Diffuse: NdotL with wrap for softer terminator.
     float ndl = dot(n, lightDir);
@@ -187,7 +189,9 @@ float3 applyLighting(float3 albedo,
     spec *= clamp(n.y * 1.5, 0.0, 1.0);
 
     // Fresnel rim: subtle edge definition (kept low to avoid plastic look).
-    float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.12;
+    // v1.3.0: f*f*f instead of pow(f, 3.0) — identical result, faster.
+    float fresBase = 1.0 - max(dot(n, viewDir), 0.0);
+    float fresnel = fresBase * fresBase * fresBase * 0.12;
 
     float3 lit = albedo * (amb + wrapNdl * sunIntensity * (1.0 - amb) * uniforms.sunColor.rgb);
     // Shader effects (specular + fresnel) are toggleable.
@@ -374,7 +378,7 @@ fragment float4 terrain_fragment_rt(MTVaryings in [[stage_in]],
     float detail = mix(n, n2, 0.5) - 0.5;
     float3 varied = in.color * (1.0 + detail * 0.12);
     // Shadow ray toward the sun; offset along the normal to avoid self-hits.
-    float3 sunDir = normalize(uniforms.lightDir.xyz);
+    float3 sunDir = uniforms.lightDir.xyz;  // v1.3.0: pre-normalized on CPU
     float shadow = rt_shadow_occlusion(tlas, in.worldPos + in.normal * 0.5,
                                        sunDir, 2000.0);
     float3 col = applyLighting(varied, in.normal, in.worldPos, in.material, uniforms);

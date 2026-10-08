@@ -92,10 +92,6 @@ struct TerrainView: UIViewRepresentable {
     /// Called once the Metal renderer exists, so ContentView can push
     /// sun updates directly without a SwiftUI re-render.
     var onRendererReady: ((MTTerrainRenderer) -> Void)?
-    /// v1.3.0: when true, the next world rebuild spawns away from volcanoes.
-    var avoidVolcanoesOnSpawn: Bool = false
-    /// v1.3.0: called when the player touches lava (walk mode).
-    var onPlayerDeath: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -108,7 +104,12 @@ struct TerrainView: UIViewRepresentable {
         view.device = MTLCreateSystemDefaultDevice()
         view.delegate = context.coordinator
         // v1.2.1: 120 for uncapped (0 = black screen bug on some iOS versions).
+        // v1.3.0: disable vsync when uncapped — without this,
+        // preferredFramesPerSecond = 120 is still capped at 60 by vsync.
         view.preferredFramesPerSecond = uncappedFPS ? 120 : 60
+        if let layer = view.layer as? CAMetalLayer {
+            layer.displaySyncEnabled = !uncappedFPS
+        }
         view.isPaused = false
         view.enableSetNeedsDisplay = false
         view.colorPixelFormat = .bgra8Unorm
@@ -124,9 +125,14 @@ struct TerrainView: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {
         // v1.2.1: 120 for uncapped (0 = black screen bug on some iOS versions).
         // v1.2.2: force apply even if value hasn't changed (SwiftUI may skip).
+        // v1.3.0: also sync displaySyncEnabled (vsync) — the actual uncapped switch.
         let targetFPS = uncappedFPS ? 120 : 60
         if uiView.preferredFramesPerSecond != targetFPS {
             uiView.preferredFramesPerSecond = targetFPS
+        }
+        if let layer = uiView.layer as? CAMetalLayer,
+           layer.displaySyncEnabled == uncappedFPS {
+            layer.displaySyncEnabled = !uncappedFPS
         }
         context.coordinator.sync(with: self)
     }
@@ -144,10 +150,6 @@ struct TerrainView: UIViewRepresentable {
         var playerPos = SIMD2<Float>(0, 0)
         var walkYaw: Float = 0
         var walkPitch: Float = -0.1
-        /// v1.3.0: latched volcano-safe respawn request (from parent).
-        var pendingAvoidVolcanoes = false
-        /// v1.3.0: blocks repeat death triggers until the world rebuilds.
-        var deathCooldown = false
 
         // Debug car state (app-only).
         var carSpawned = false
@@ -242,8 +244,6 @@ struct TerrainView: UIViewRepresentable {
         /// when the seed, rebuild token, or biome preset changed.
         func sync(with parent: TerrainView) {
             self.parent = parent
-            // v1.3.0: latch volcano-safe respawn request.
-            if parent.avoidVolcanoesOnSpawn { pendingAvoidVolcanoes = true }
             if lastSeed != parent.seed || lastToken != parent.rebuildToken || lastPreset != parent.preset || lastSimulatorMode != parent.simulatorMode {
                 rebuildWorld(seed: parent.seed, preset: parent.preset)
                 lastSeed = parent.seed
@@ -332,14 +332,7 @@ struct TerrainView: UIViewRepresentable {
             renderer.showsWater = parent.showsWater
             self.renderer = renderer
             // Find safe spawn: search outward for land above sea level.
-            // v1.3.0: after lava death, spawn away from volcanoes.
-            if pendingAvoidVolcanoes {
-                playerPos = world.findSafeSpawn()
-                pendingAvoidVolcanoes = false
-            } else {
-                playerPos = findSafeSpawn(in: world)
-            }
-            deathCooldown = false
+            playerPos = findSafeSpawn(in: world)
             parent.onRendererReady?(renderer)
             // ─────────────────────────────────────────────────────────
         }
@@ -583,7 +576,6 @@ struct TerrainView: UIViewRepresentable {
                 camTarget = camPosition + lookDir * 10
                 // Keep the chunk streamer centered on the player.
                 target = SIMD3<Float>(playerPos.x, 0, playerPos.y)
-                // v1.3.0 lava death removed with volcanoes.
             } else {
                 // Orbit mode: joystick moves the target (camera follows).
                 let input = parent.moveInput

@@ -369,7 +369,8 @@ public final class MTTerrainRenderer {
         lastCameraTarget = cameraTarget
         // Time-of-day clock: advances even when the camera is still, so it
         // runs before the early-return below.
-        let now = Date().timeIntervalSince1970
+        // v1.3.0: CACurrentMediaTime instead of Date() (no allocation).
+        let now = CACurrentMediaTime()
         if let last = lastUpdateTime {
             updateTimeOfDay(dt: Float(now - last))
         }
@@ -501,14 +502,19 @@ public final class MTTerrainRenderer {
             view.colorPixelFormat = .bgra8Unorm
             viewConfigured = true
         }
+        // v1.3.0: wait on the frame semaphore BEFORE acquiring the drawable.
+        // The old order (drawable first, then wait) held a drawable while
+        // blocked, starving the compositor under load.
+        frameSemaphore.wait()
         guard let drawable = view.currentDrawable,
               let pass = view.currentRenderPassDescriptor,
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass)
-        else { return }
+        else {
+            frameSemaphore.signal()
+            return
+        }
 
-        // Wait for an in-flight frame to finish before reusing its slot.
-        frameSemaphore.wait()
         commandBuffer.addCompletedHandler { [weak self] _ in
             self?.frameSemaphore.signal()
         }
@@ -516,7 +522,8 @@ public final class MTTerrainRenderer {
         frameIndex = (frameIndex + 1) % maxFramesInFlight
         let terrainSlot = frameIndex * slotsPerFrame
         let waterSlot = terrainSlot + 1
-        let time = Float(Date().timeIntervalSince(startTime))
+        // v1.3.0: CACurrentMediaTime instead of Date() (no allocation).
+        let time = Float(CACurrentMediaTime() - startTime)
 
         drawScene(encoder: encoder, viewProj: viewProj, cameraPos: cameraPos,
                   terrainSlot: terrainSlot, waterSlot: waterSlot, time: time,
@@ -578,7 +585,8 @@ public final class MTTerrainRenderer {
         // includeSky: false — the reflection target is tiny (e.g. 256x128
         // for car mirrors); sky detail (clouds, stars) is invisible there.
         let reflectionSlot = maxFramesInFlight * slotsPerFrame
-        let time = Float(Date().timeIntervalSince(startTime))
+        // v1.3.0: CACurrentMediaTime instead of Date() (no allocation).
+        let time = Float(CACurrentMediaTime() - startTime)
         drawScene(encoder: encoder, viewProj: mirrorViewProj, cameraPos: cameraPosition,
                   terrainSlot: reflectionSlot, waterSlot: reflectionSlot + 1, time: time,
                   includeStructures: false, includeWater: false, includeSky: false)
@@ -932,7 +940,8 @@ public final class MTTerrainRenderer {
     private var lastRadius: Int?
     private var lastConfigVersion: UInt64 = 0
     // v1.1.0: removed (opacity now comes from waterParamsBuffer).
-    private let startTime = Date()
+    // v1.3.0: CACurrentMediaTime (no Date allocation per frame).
+    private let startTime = CACurrentMediaTime()
 
     // Triple-buffered uniforms; two slots per frame (terrain + water).
     // The semaphore guarantees the CPU never overwrites a uniform slot
@@ -1340,7 +1349,7 @@ public final class MTTerrainRenderer {
                                 vertexBuffer: gpu.vertexBuffer,
                                 indexBuffer: ib,
                                 indexCount: gpuIndices.count,
-                                lastUsed: Date().timeIntervalSince1970,
+                                lastUsed: CACurrentMediaTime(),
                                 boundsMin: SIMD3<Float>(x0, min(y0, y1) - 20, z0),
                                 boundsMax: SIMD3<Float>(x0 + size, max(y0, y1) + 20, z0 + size)
                             )
@@ -1384,7 +1393,7 @@ public final class MTTerrainRenderer {
                     vertexBuffer: vb,
                     indexBuffer: ib,
                     indexCount: mesh.indices.count,
-                    lastUsed: Date().timeIntervalSince1970,
+                    lastUsed: CACurrentMediaTime(),
                     boundsMin: SIMD3<Float>(x0, min(y0, y1) - 20, z0),
                     boundsMax: SIMD3<Float>(x0 + size, max(y0, y1) + 20, z0 + size)
                 )

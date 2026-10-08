@@ -101,7 +101,8 @@ float sky_vnoise(float2 p) {
 fragment float4 sky_fragment(MTSkyVaryings in [[stage_in]],
                              constant MTSkyUniforms &uniforms [[buffer(0)]]) {
     float3 viewDir = normalize(in.viewDir);
-    float3 sunDir = normalize(uniforms.sunDir.xyz);
+    // v1.3.0: sunDir is pre-normalized on the CPU in MTSkybox.sunDirection().
+    float3 sunDir = uniforms.sunDir.xyz;
     float elev = uniforms.skyParams.x;  // radians
     float time = uniforms.skyParams.y;  // seconds
     float cloudAmt = clamp(uniforms.skyParams.z, 0.0, 1.0);

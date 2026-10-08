@@ -263,7 +263,7 @@ float3 meshApplyLighting(float3 albedo,
                          constant MTUniforms &uniforms) {
     float3 n = normalize(normal);
     float3 viewDir = normalize(uniforms.cameraPos.xyz - worldPos);
-    float3 lightDir = normalize(uniforms.lightDir.xyz);
+    float3 lightDir = uniforms.lightDir.xyz;  // v1.3.0: pre-normalized on CPU
 
     // Diffuse: NdotL with wrap for softer terminator.
     float ndl = dot(n, lightDir);
