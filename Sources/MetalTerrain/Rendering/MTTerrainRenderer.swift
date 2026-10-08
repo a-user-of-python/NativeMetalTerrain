@@ -724,6 +724,25 @@ public final class MTTerrainRenderer {
                         ptr[idx * 2] = SIMD4<Float>(inst.position, inst.size)
                         ptr[idx * 2 + 1] = SIMD4<Float>(inst.kind, inst.heat, 0, 0)
                     }
+                    // Pool FX uniforms: sim time + up to 3 landing ripples.
+                    if lavaFXBuffer == nil {
+                        lavaFXBuffer = device.makeBuffer(length: 64,
+                                                         options: .storageModeShared)
+                    }
+                    if let fx = lavaFXBuffer {
+                        let fp = fx.contents().assumingMemoryBound(to: SIMD4<Float>.self)
+                        fp[0] = SIMD4<Float>(lavaTime, 0, 0, 0)
+                        for k in 0..<3 {
+                            if k < lava.ripples.count {
+                                let rp = lava.ripples[k]
+                                fp[k + 1] = SIMD4<Float>(rp.center.x, rp.center.y,
+                                                         rp.startTime, 0)
+                            } else {
+                                fp[k + 1] = SIMD4<Float>(0, 0, -100, 0)
+                            }
+                        }
+                        encoder.setFragmentBuffer(fx, offset: 0, index: 2)
+                    }
                     encoder.setRenderPipelineState(lavaPipeline)
                     encoder.setDepthStencilState(waterDepthState)
                     bindUniforms(encoder, slot: terrainSlot)
@@ -1086,6 +1105,10 @@ public final class MTTerrainRenderer {
     /// v1.3.0: reusable lava instance buffer (320 max × 32 bytes:
     /// 200 blobs + 100 deposits + 3 pools + headroom).
     private var lavaInstanceBuffer: MTLBuffer?
+    /// Lava FX uniforms for the pool shader (fragment buffer 2):
+    /// 4 × float4 — [0].x = sim time, [1..3] = ripples (xy = world xz
+    /// center, z = start time; z < -50 means inactive).
+    private var lavaFXBuffer: MTLBuffer?
     // Generation counter: bumped by invalidateCaches(). Background builds
     // capture the generation at dispatch; if it changed by completion,
     // the mesh is stale (built from an old config) and must be dropped.

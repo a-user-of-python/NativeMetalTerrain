@@ -33,19 +33,32 @@ public struct MTLavaDeposit {
 public struct MTLavaRenderInstance {
     public var position: SIMD3<Float>
     public var size: Float
-    /// 0 = flying blob (round), 1 = ground deposit (flat disc).
+    /// 0 = flying blob (billboard), 1 = ground deposit (flat disc),
+    /// 2 = crater pool (domed liquid disc).
     public var kind: Float
     /// 0...1 freshness: drives brightness in the shader.
     public var heat: Float
+}
+
+/// A ripple on a crater lava pool, triggered when a blob lands in it.
+/// Rendered as an expanding bright ring in the pool shader.
+public struct MTLavaRipple {
+    public var center: SIMD2<Float>  // world xz where the blob landed
+    public var startTime: Float      // sim-time seconds
 }
 
 /// Simulates volcano eruptions and lava. Owned by MTTerrainRenderer.
 public final class MTLavaParticles {
     public static let maxParticles = 200
     public static let maxDeposits = 100
+    public static let maxRipples = 3
 
     private(set) public var particles: [MTLavaParticle] = []
     private(set) public var deposits: [MTLavaDeposit] = []
+    /// Active pool ripples (oldest dropped beyond maxRipples).
+    private(set) public var ripples: [MTLavaRipple] = []
+    /// Simulation clock, seconds. Drives ripple aging.
+    private(set) public var simTime: Float = 0
 
     private struct VentState {
         var timer: Float     // seconds until eruption state flips
@@ -72,6 +85,8 @@ public final class MTLavaParticles {
         rng = MTSeededRandom(seed: seed ^ 0x5A1A5A1A5A1A5A1A)
         particles.removeAll(keepingCapacity: true)
         deposits.removeAll(keepingCapacity: true)
+        ripples.removeAll(keepingCapacity: true)
+        simTime = 0
         ventStates.removeAll(keepingCapacity: true)
         poolVents.removeAll(keepingCapacity: true)
         poolFloorY.removeAll(keepingCapacity: true)
@@ -86,6 +101,9 @@ public final class MTLavaParticles {
                        cameraTarget: SIMD2<Float>) {
         let dt = min(max(dt, 0), 0.1)
         frame &+= 1
+        simTime += dt
+        // Age out ripples older than 3 seconds (shader fades them by then).
+        ripples.removeAll { simTime - $0.startTime > 3.0 }
         let vents = world.volcanoVents
         poolVents = vents
         // Crater floor Y per vent: pre-carve peak minus full crater depth
@@ -148,6 +166,21 @@ public final class MTLavaParticles {
                 let groundY = h * heightScale
                 if p.position.y <= groundY + 0.3 {
                     landBlob(p, groundY: groundY)
+                    // Ripple on the crater pool if the blob landed in one.
+                    for v in poolVents {
+                        let dx = p.position.x - v.position.x
+                        let dz = p.position.z - v.position.y
+                        let r = v.craterRadius * 0.7
+                        if dx * dx + dz * dz < r * r {
+                            ripples.append(MTLavaRipple(
+                                center: SIMD2<Float>(p.position.x, p.position.z),
+                                startTime: simTime))
+                            if ripples.count > Self.maxRipples {
+                                ripples.removeFirst()
+                            }
+                            break
+                        }
+                    }
                     kill = true
                 }
             }
@@ -227,8 +260,9 @@ public final class MTLavaParticles {
         return out
     }
 
-    /// Lava pool instances: one glowing disc per nearby vent, rendered
-    /// with the deposit shader. Heat pulses for a bubbling look.
+    /// Lava pool instances: one domed liquid disc per nearby vent.
+    /// Kind 2 in the shader (domed liquid path with crust/ripples).
+    /// Heat pulses for a bubbling look.
     /// Call each frame and append to `renderInstances()` output.
     public func poolInstances(time: Float,
                               cameraTarget: SIMD2<Float>) -> [MTLavaRenderInstance] {
@@ -244,7 +278,7 @@ public final class MTLavaParticles {
             out.append(MTLavaRenderInstance(
                 position: SIMD3<Float>(v.position.x, floorY, v.position.y),
                 size: v.craterRadius * 0.7,
-                kind: 1,
+                kind: 2,
                 heat: heat))
         }
         return out

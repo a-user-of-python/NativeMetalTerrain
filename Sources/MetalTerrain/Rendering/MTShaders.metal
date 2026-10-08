@@ -348,8 +348,33 @@ struct MTLavaVaryings {
     float4 clipPos [[position]];
     float2 uv;     // -1..1 quad coords
     float  heat;
-    float  kind;
+    float  kind;   // 0 = blob, 1 = deposit, 2 = crater pool
+    float3 worldPos;
+    float3 domeN;  // dome normal (pools only; up otherwise)
 };
+
+// Hash-based value noise for the lava crust texture (no texture fetch).
+inline float lavaHash(float2 p) {
+    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+}
+inline float lavaNoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(lavaHash(i), lavaHash(i + float2(1.0, 0.0)), u.x),
+               mix(lavaHash(i + float2(0.0, 1.0)), lavaHash(i + float2(1.0, 1.0)), u.x),
+               u.y);
+}
+inline float lavaFbm(float2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int k = 0; k < 3; k++) {
+        v += a * lavaNoise(p);
+        p = p * 2.03 + float2(19.7, 7.3);
+        a *= 0.5;
+    }
+    return v;
+}
 
 vertex MTLavaVaryings lava_vertex(const device MTLavaInstance *instances [[buffer(0)]],
                                   constant MTUniforms &uniforms [[buffer(1)]],
@@ -362,28 +387,90 @@ vertex MTLavaVaryings lava_vertex(const device MTLavaInstance *instances [[buffe
     float2 corner = float2((vid & 1u) ? 1.0 : -1.0,
                            (vid & 2u) ? 1.0 : -1.0);
     float3 world;
-    if (inst.kindHeat.x > 0.5) {
-        // Deposit: flat disc lying on the terrain (XZ plane).
-        world = center + float3(corner.x, 0.0, corner.y) * size;
-    } else {
+    float3 domeN = float3(0.0, 1.0, 0.0);
+    if (inst.kindHeat.x < 0.5) {
         // Blob: camera-facing billboard.
         float3 look = normalize(uniforms.cameraPos.xyz - center + float3(0.0, 0.001, 0.0));
         float3 right = normalize(cross(float3(0.0, 1.0, 0.0), look));
         float3 up = cross(look, right);
         world = center + (right * corner.x + up * corner.y) * size;
+    } else if (inst.kindHeat.x < 1.5) {
+        // Deposit: flat disc lying on the terrain (XZ plane).
+        world = center + float3(corner.x, 0.0, corner.y) * size;
+    } else {
+        // Pool: domed disc — liquid mounded in the crater bowl.
+        // Dome height peaks at the center and falls to zero at the rim,
+        // so the edge meets the crater wall cleanly with no gap/overlap.
+        float r2 = dot(corner, corner);  // 0 center → 1 at disc rim
+        world = center + float3(corner.x, 0.0, corner.y) * size;
+        world.y += (1.0 - r2) * size * 0.06;
+        // Cheap analytic dome normal for a hint of curvature shading.
+        domeN = normalize(float3(-corner.x * 0.18, 1.0, -corner.y * 0.18));
     }
     MTLavaVaryings out;
     out.clipPos = uniforms.viewProj * float4(world, 1.0);
     out.uv = corner;
     out.heat = inst.kindHeat.y;
     out.kind = inst.kindHeat.x;
+    out.worldPos = world;
+    out.domeN = domeN;
     return out;
 }
 
-fragment float4 lava_fragment(MTLavaVaryings in [[stage_in]]) {
+// Lava FX uniforms (fragment buffer 2):
+//   lavaFX[0].x = sim time seconds
+//   lavaFX[1..3] = ripples, .xy = world-xz center, .z = start time
+//                  (startTime < -50 means inactive)
+fragment float4 lava_fragment(MTLavaVaryings in [[stage_in]],
+                              constant float4 *lavaFX [[buffer(2)]]) {
+    float time = lavaFX[0].x;
     float r = length(in.uv);  // 0 at center → ~1.41 at corners
     float falloff = clamp(1.0 - r, 0.0, 1.0);
     falloff *= falloff;
+    float alpha = falloff * (0.30 + 0.70 * in.heat);
+
+    if (in.kind > 1.5) {
+        // ---- Crater pool: pahoehoe lava with drifting crust ----
+        // World-stable coords so the texture doesn't swim with the camera.
+        float2 lp = in.worldPos.xz * 0.055;
+        // Slow drift + counter-drift: crust plates break apart and reform.
+        float2 drift = float2(time * 0.016, time * 0.011);
+        float n = lavaFbm(lp * 3.0 + drift * 3.0);
+        float n2 = lavaFbm(lp * 3.0 - drift * 2.0 + 5.2);
+        // Dark solidified crust where noise is high; glowing cracks between.
+        float crust = smoothstep(0.38, 0.68, n);
+        float crackGlow = 1.0 - smoothstep(0.30, 0.62, n2);
+        float3 crustCol = float3(0.11, 0.085, 0.075);
+        float3 crackHot = mix(float3(1.0, 0.28, 0.03),
+                              float3(1.0, 0.72, 0.22), crackGlow);
+        float3 col = mix(crackHot, crustCol, crust * 0.88);
+        // Emissive: rich orange-red, never blown out to white.
+        col *= (0.85 + 1.15 * in.heat);
+        // Gentle ambient surface waves.
+        float wv = sin(dot(in.worldPos.xz, float2(0.20, 0.13)) + time * 0.9)
+                 * sin(dot(in.worldPos.xz, float2(-0.11, 0.17)) + time * 0.7);
+        col *= 1.0 + wv * 0.06;
+        // Blob-landing ripples: expanding bright rings, fading over ~3s.
+        for (int k = 1; k <= 3; k++) {
+            float4 rp = lavaFX[k];
+            float age = time - rp.z;
+            if (age > 0.0 && age < 3.0) {
+                float d = distance(in.worldPos.xz, rp.xy);
+                float waveR = age * 12.0;
+                float ring = sin((d - waveR) * 2.2)
+                           * exp(-abs(d - waveR) * 0.30)
+                           * exp(-age * 1.2);
+                col += float3(1.0, 0.45, 0.12) * max(ring, 0.0) * 0.9;
+            }
+        }
+        // Dome curvature shading: subtle light response on the mound.
+        float ndl = max(dot(in.domeN, normalize(float3(0.35, 0.85, 0.30))), 0.0);
+        col *= 0.82 + 0.36 * ndl;
+        // Fade the very rim so the pool melts into the crater wall.
+        alpha *= 1.0 - smoothstep(0.82, 1.0, r);
+        return float4(col * alpha, alpha);
+    }
+
     // Hot yellow-white core → orange → deep red edge.
     float3 hot  = float3(1.0, 0.85, 0.30);
     float3 mid  = float3(1.0, 0.35, 0.05);
@@ -392,14 +479,12 @@ fragment float4 lava_fragment(MTLavaVaryings in [[stage_in]]) {
     // Emissive boost so lava glows at night (additive blending).
     // Kept modest so lava reads orange-red, not blown-out white.
     col *= (0.8 + 1.2 * in.heat);
-    // v1.3.0-refine: deposits cool to black rock as heat fades.
-    // (Pools keep heat high via the bubbling pulse, so they stay molten.)
     if (in.kind > 0.5) {
+        // Deposits cool to black rock as heat fades.
         float coolT = 1.0 - in.heat;
         float3 cooled = float3(0.09, 0.085, 0.09);
         col = mix(col, cooled, coolT * coolT * 0.95);
     }
-    float alpha = falloff * (0.30 + 0.70 * in.heat);
     return float4(col * alpha, alpha);
 }
 
@@ -450,12 +535,4 @@ fragment float4 terrain_fragment_rt(MTVaryings in [[stage_in]],
     return float4(col, 1.0);
 }
 #endif // M3_FEATURES
-
-// MARK: - Lava particles (v1.3.0)
-
-struct LavaVaryings {
-    float4 position [[position]];
-    float2 uv;
-    float  kind;  // 0 = blob, 1 = deposit
-};
 
