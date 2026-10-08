@@ -390,7 +390,8 @@ fragment float4 lava_fragment(MTLavaVaryings in [[stage_in]]) {
     float3 cool = float3(0.45, 0.05, 0.01);
     float3 col = mix(cool, mix(mid, hot, falloff), falloff);
     // Emissive boost so lava glows at night (additive blending).
-    col *= (1.2 + 2.4 * in.heat);
+    // Kept modest so lava reads orange-red, not blown-out white.
+    col *= (0.8 + 1.2 * in.heat);
     // v1.3.0-refine: deposits cool to black rock as heat fades.
     // (Pools keep heat high via the bubbling pulse, so they stay molten.)
     if (in.kind > 0.5) {

@@ -266,8 +266,8 @@ public final class MTTerrainWorld {
                 position: SIMD2<Float>(Float(bx), Float(bz)),
                 peakHeight: bh,
                 craterRadius: craterRadius,
-                craterDepth: 0.08,
-                ventY: worldY(forHeight: bh) - 0.08 * config.heightScale * 0.5
+                craterDepth: 0.12,
+                ventY: worldY(forHeight: bh) - 0.12 * config.heightScale * 0.5
             )
         }
     }
@@ -307,10 +307,14 @@ public final class MTTerrainWorld {
                     let idx = iz * res + ix
                     var h = Double(heights[idx]) / 65535.0
                     // Cone shaping: blend toward idealized cone profile.
+                    // Fade the blend to zero inside the crater bowl so the
+                    // carve below produces a clean hole (no fill-in).
                     do {
                         let t = dist / coneR
                         let coneH = peakH * pow(1.0 - t, 1.25)
-                        let w = 0.45 * (1.0 - t) * (1.0 - t)
+                        var w = 0.45 * (1.0 - t) * (1.0 - t)
+                        let craterT = min(max((dist - r * 0.8) / (r * 0.5), 0.0), 1.0)
+                        w *= craterT
                         h = h * (1.0 - w) + coneH * w
                     }
                     // Crater carving (wobbled edge).

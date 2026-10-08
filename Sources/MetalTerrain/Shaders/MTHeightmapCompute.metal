@@ -264,6 +264,10 @@ kernel void mtHeightmapKernel(
             float t = dist / coneR;
             float coneH = vents[v].peakHeight * pow(1.0 - t, 1.25);
             float w = 0.45 * (1.0 - t) * (1.0 - t);
+            // Fade the cone blend to zero inside the crater bowl so the
+            // carve below produces a clean hole (no fill-in).
+            float craterT = clamp((dist - r * 0.8) / (r * 0.5), 0.0, 1.0);
+            w *= craterT;
             h = h * (1.0 - w) + coneH * w;
         }
         if (dist < r * 1.35) {

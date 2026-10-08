@@ -484,10 +484,10 @@ public enum MTMeshBuilder {
         // Deterministic hash -> 0...1 (no noise eval needed per vertex).
         let n = fract(sin(wx * 12.9898 + wz * 78.233) * 43758.5453)
         let v = SIMD3<Float>(0.10, 0.095, 0.105) * (0.8 + 0.4 * n)
-        // Occasional ash patches (lighter gray).
+        // Occasional ash patches (slightly lighter gray, not white).
         let ash = fract(sin(wx * 3.7 + wz * 9.1) * 24634.6345)
-        if ash > 0.93 {
-            return SIMD3<Float>(0.32, 0.30, 0.29) * (0.85 + 0.3 * n)
+        if ash > 0.97 {
+            return SIMD3<Float>(0.18, 0.17, 0.16) * (0.85 + 0.3 * n)
         }
         return v
     }

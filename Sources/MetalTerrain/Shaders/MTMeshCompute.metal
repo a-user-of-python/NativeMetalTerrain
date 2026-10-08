@@ -163,8 +163,8 @@ inline float volcanicBlend(float2 wpos, constant float2 *ventPos, uint ventCount
 inline float3 basaltColor(float2 wpos) {
     float n = fract(sin(dot(wpos, float2(12.9898f, 78.233f))) * 43758.5453f);
     float ash = fract(sin(dot(wpos, float2(3.7f, 9.1f))) * 24634.6345f);
-    if (ash > 0.93f) {
-        return float3(0.32f, 0.30f, 0.29f) * (0.85f + 0.3f * n);
+    if (ash > 0.97f) {
+        return float3(0.18f, 0.17f, 0.16f) * (0.85f + 0.3f * n);
     }
     return float3(0.10f, 0.095f, 0.105f) * (0.8f + 0.4f * n);
 }
