@@ -152,7 +152,7 @@ class MTRoadGeometry {
 
     /// Terrain world Y at XZ.
     private static func sampleHeight(_ p: SIMD2<Float>, world: MTTerrainWorld) -> Float {
-        world.worldY(forHeight: world.heightAt(x: Double(p.x), y: Double(p.y)))
+        world.worldY(forHeight: world.heightAt(x: Double(p.x), z: Double(p.y)))
     }
 
     /// Simple moving-average smoothing.
