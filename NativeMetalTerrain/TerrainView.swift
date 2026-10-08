@@ -583,15 +583,7 @@ struct TerrainView: UIViewRepresentable {
                 camTarget = camPosition + lookDir * 10
                 // Keep the chunk streamer centered on the player.
                 target = SIMD3<Float>(playerPos.x, 0, playerPos.y)
-                // v1.3.0: lava death — torso-height check against live lava.
-                if !deathCooldown {
-                    let torso = SIMD3<Float>(playerPos.x, groundY + 1.0, playerPos.y)
-                    // if renderer.isLavaAt(torso) { // volcano removed
-                        deathCooldown = true
-                        let handler = parent.onPlayerDeath
-                        DispatchQueue.main.async { handler?() }
-                    }
-                }
+                // v1.3.0 lava death removed with volcanoes.
             } else {
                 // Orbit mode: joystick moves the target (camera follows).
                 let input = parent.moveInput
