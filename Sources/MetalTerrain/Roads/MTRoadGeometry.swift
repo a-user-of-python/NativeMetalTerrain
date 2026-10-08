@@ -26,7 +26,7 @@ struct MTRoadMesh {
     var vertices: [MTRoadVertex]
     var indices: [UInt32]
     var boundsMin: SIMD3<Float>
-    var boundsMax: SIMD3<Float]
+    var boundsMax: SIMD3<Float>
     var isEmpty: Bool { vertices.isEmpty }
 }
 
