@@ -81,15 +81,9 @@ public final class MTTerrainView: MTKView {
     /// v1.2.0: when true, removes the 60fps cap (renders at up to 120fps).
     /// v1.2.1: uses 120, not 0 (0 causes black screen on some iOS versions).
     /// On ProMotion displays this can reach 120fps.
-    /// v1.3.0: also disables vsync (displaySyncEnabled = false) — without
-    /// this, preferredFramesPerSecond = 120 does nothing on 60Hz displays
-    /// and the FPS counter never goes above 60.
     public var uncappedFPS: Bool = false {
         didSet {
             preferredFramesPerSecond = uncappedFPS ? 120 : 60
-            if let layer = self.layer as? CAMetalLayer {
-                layer.displaySyncEnabled = !uncappedFPS
-            }
         }
     }
 
