@@ -104,12 +104,7 @@ struct TerrainView: UIViewRepresentable {
         view.device = MTLCreateSystemDefaultDevice()
         view.delegate = context.coordinator
         // v1.2.1: 120 for uncapped (0 = black screen bug on some iOS versions).
-        // v1.3.0: disable vsync when uncapped — without this,
-        // preferredFramesPerSecond = 120 is still capped at 60 by vsync.
         view.preferredFramesPerSecond = uncappedFPS ? 120 : 60
-        if let layer = view.layer as? CAMetalLayer {
-            layer.displaySyncEnabled = !uncappedFPS
-        }
         view.isPaused = false
         view.enableSetNeedsDisplay = false
         view.colorPixelFormat = .bgra8Unorm
@@ -125,14 +120,9 @@ struct TerrainView: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {
         // v1.2.1: 120 for uncapped (0 = black screen bug on some iOS versions).
         // v1.2.2: force apply even if value hasn't changed (SwiftUI may skip).
-        // v1.3.0: also sync displaySyncEnabled (vsync) — the actual uncapped switch.
         let targetFPS = uncappedFPS ? 120 : 60
         if uiView.preferredFramesPerSecond != targetFPS {
             uiView.preferredFramesPerSecond = targetFPS
-        }
-        if let layer = uiView.layer as? CAMetalLayer,
-           layer.displaySyncEnabled == uncappedFPS {
-            layer.displaySyncEnabled = !uncappedFPS
         }
         context.coordinator.sync(with: self)
     }
