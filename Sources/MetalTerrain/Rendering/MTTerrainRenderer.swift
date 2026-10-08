@@ -415,7 +415,6 @@ public final class MTTerrainRenderer {
         // see-through holes during fast movement.
         for coord in chunkCache.keys where Self.chebyshev(coord, center) > radius + 1 {
             chunkCache.removeValue(forKey: coord)
-            roadCache.removeValue(forKey: coord)  // v1.3.0: roads go with terrain
         }
         // LRU cap: never hold more than the visible square plus the 1-chunk
         // eviction buffer, with an absolute ceiling so a large viewDistance
@@ -428,7 +427,6 @@ public final class MTTerrainRenderer {
                 .map { $0.key }
             for coord in oldest {
                 chunkCache.removeValue(forKey: coord)
-                roadCache.removeValue(forKey: coord)  // v1.3.0
             }
         }
         for coord in needed {
@@ -688,24 +686,6 @@ public final class MTTerrainRenderer {
             encoder.setCullMode(.back)  // restore for water/terrain
         }
 
-        // v1.3.0: roads — 1 draw call per chunk with cached road geometry.
-        // Drawn after terrain/structures, before water. Depth-tested so
-        // bridges span water and roads tuck under overpasses correctly.
-        if let roadPipeline = roadPipeline {
-            encoder.setRenderPipelineState(roadPipeline)
-            bindUniforms(encoder, slot: terrainSlot)
-            cacheLock.lock()
-            for road in roadCache.values {
-                guard frustum.intersects(min: road.boundsMin, max: road.boundsMax) else { continue }
-                encoder.setVertexBuffer(road.vertexBuffer, offset: 0, index: 0)
-                encoder.drawIndexedPrimitives(type: .triangle,
-                                              indexCount: road.indexCount,
-                                              indexType: .uint32,
-                                              indexBuffer: road.indexBuffer,
-                                              indexBufferOffset: 0)
-            }
-            cacheLock.unlock()
-        }
 
         // 1 draw for water, blended, drawn last (skipped for reflections).
         if includeWater, showsWater, let wvb = waterVertexBuffer, let wib = waterIndexBuffer {
@@ -933,8 +913,6 @@ public final class MTTerrainRenderer {
     private var terrainPipeline: MTLRenderPipelineState!
     private var waterPipeline: MTLRenderPipelineState!
     private var structurePipeline: MTLRenderPipelineState!
-    /// v1.3.0: road rendering pipeline (nil if road shaders missing).
-    private var roadPipeline: MTLRenderPipelineState?
     #if M3_FEATURES
     /// Ray-traced shadow variant of the terrain pipeline. Nil when the
     /// RT fragment function failed to compile; falls back to terrainPipeline.
@@ -990,15 +968,6 @@ public final class MTTerrainRenderer {
         #endif
     }
 
-    /// v1.3.0: baked road geometry for one chunk (GPU buffers).
-    private struct RoadMeshGPU {
-        var vertexBuffer: MTLBuffer
-        var indexBuffer: MTLBuffer
-        var indexCount: Int
-        var boundsMin: SIMD3<Float>
-        var boundsMax: SIMD3<Float>
-    }
-
     /// Camera frustum planes extracted from the view-projection matrix.
     /// Each plane is (normal.xyz, distance): points with dot(n, p) + d > 0
     /// are inside.
@@ -1043,8 +1012,6 @@ public final class MTTerrainRenderer {
         return len > 0 ? p / len : p
     }
     private var chunkCache: [MTChunkCoord: ChunkMesh] = [:]
-    /// v1.3.0: per-chunk baked road geometry (highways, ramps, streets, bridges).
-    private var roadCache: [MTChunkCoord: RoadMeshGPU] = [:]
     private var pendingBuilds = Set<MTChunkCoord>()
     private let cacheLock = NSLock()
     private let buildQueue = DispatchQueue(label: "com.MetalTerrain.meshBuild",
@@ -1168,12 +1135,6 @@ public final class MTTerrainRenderer {
                 descriptor: descriptor(vertex: "terrain_vertex", fragment: "water_fragment", blending: true))
             structurePipeline = try device.makeRenderPipelineState(
                 descriptor: descriptor(vertex: "structure_vertex", fragment: "structure_fragment", blending: false))
-            // v1.3.0: roads. Best-effort: nil when the shader is missing.
-            if library.makeFunction(name: "road_vertex") != nil,
-               library.makeFunction(name: "road_fragment") != nil {
-                roadPipeline = try device.makeRenderPipelineState(
-                    descriptor: descriptor(vertex: "road_vertex", fragment: "road_fragment", blending: false))
-            }
             #if M3_FEATURES
             // Ray-traced shadow variant of the terrain pipeline. Best-effort:
             // nil when the function is missing (older .metallib) — the
@@ -1218,11 +1179,6 @@ public final class MTTerrainRenderer {
                                                    vertex: "structure_vertex",
                                                    fragment: "structure_fragment",
                                                    blending: false)
-            // v1.3.0: roads (Metal 4). Best-effort.
-            roadPipeline = try? metal4Pipeline(compiler: compiler, library: library,
-                                               vertex: "road_vertex",
-                                               fragment: "road_fragment",
-                                               blending: false)
             return true
         } catch {
             return false
@@ -1394,8 +1350,6 @@ public final class MTTerrainRenderer {
                             self.chunkCache[coord]?.lodStride = distanceFactor > 0.4 ? 2 : 1
                             #endif
                         }
-                        // v1.3.0: bake road geometry for this chunk.
-                        self.buildRoads(for: coord, size: size, generation: generation)
                         self.pendingBuilds.remove(coord)
                         self.cacheLock.unlock()
                         return
@@ -1440,36 +1394,9 @@ public final class MTTerrainRenderer {
                 self.chunkCache[coord]?.lodStride = distanceFactor > 0.4 ? 2 : 1
                 #endif
             }
-            // v1.3.0: bake road geometry for this chunk.
-            self.buildRoads(for: coord, size: size, generation: generation)
             self.pendingBuilds.remove(coord)
             self.cacheLock.unlock()
         }
-    }
-
-    // MARK: - Roads (v1.3.0)
-
-    /// Build and cache road geometry for a chunk. Called on the build queue
-    /// after the terrain mesh is cached. Roads are queried from the
-    /// deterministic road network, so neighboring chunks agree on shared
-    /// segments without any cross-chunk communication.
-    private func buildRoads(for coord: MTChunkCoord, size: Float, generation: UInt64) {
-        let x0 = Float(coord.x) * size
-        let z0 = Float(coord.z) * size
-        let paths = world.roadNetwork.roads(minX: x0, minZ: z0, maxX: x0 + size, maxZ: z0 + size)
-        guard !paths.isEmpty else { return }
-        let mesh = MTRoadGeometry.build(paths: paths, world: world)
-        guard !mesh.isEmpty,
-              let vb = sharedBuffer(from: mesh.vertices),
-              let ib = sharedBuffer(from: mesh.indices) else { return }
-        cacheLock.lock()
-        if generation == buildGeneration {
-            roadCache[coord] = RoadMeshGPU(
-                vertexBuffer: vb, indexBuffer: ib,
-                indexCount: mesh.indices.count,
-                boundsMin: mesh.boundsMin, boundsMax: mesh.boundsMax)
-        }
-        cacheLock.unlock()
     }
 
     private func sharedBuffer<T>(from array: [T]) -> MTLBuffer? {

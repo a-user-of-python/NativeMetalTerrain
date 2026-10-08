@@ -17,24 +17,6 @@ public final class MTTerrainWorld {
     private var _config: MTTerrainConfig
     private var _seed: UInt64
 
-    // MARK: - Roads (v1.3.0)
-
-    private let roadNetworkLock = NSLock()
-    private var _roadNetwork: MTRoadNetwork?
-    private var _roadNetworkSeed: UInt64 = 0
-
-    /// Deterministic infinite road network for the current seed.
-    /// Rebuilt automatically if the seed changes. Thread-safe.
-    public var roadNetwork: MTRoadNetwork {
-        let s = seed
-        roadNetworkLock.lock()
-        defer { roadNetworkLock.unlock() }
-        if let rn = _roadNetwork, _roadNetworkSeed == s { return rn }
-        let rn = MTRoadNetwork(seed: s)
-        _roadNetwork = rn
-        _roadNetworkSeed = s
-        return rn
-    }
 
     /// Live configuration (noise knobs, biomes, structure toggle, ...).
     /// Thread-safe. Setting it bumps `configVersion` so renderers can
