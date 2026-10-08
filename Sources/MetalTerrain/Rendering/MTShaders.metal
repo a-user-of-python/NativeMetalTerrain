@@ -417,6 +417,21 @@ vertex MTRoadVaryings road_vertex(const device MTRoadVertexIn *verts [[buffer(0)
 }
 
 // Procedural lane markings. v in [-1, 1] across the road.
+/// Simple NdotL + ambient lighting for road surfaces, matching terrain.
+inline float3 applyRoadLighting(float3 albedo, float3 worldPos, constant MTUniforms &uniforms) {
+    float3 up = float3(0.0, 1.0, 0.0);  // roads are near-flat
+    float3 lightDir = normalize(uniforms.lightDir.xyz);
+    float ndl = dot(up, lightDir);
+    float wrapNdl = clamp((ndl + 0.4) / 1.4, 0.0, 1.0);
+    float amb = uniforms.lightDir.w;
+    float sunIntensity = uniforms.seaLevel.y;
+    float3 lit = albedo * (amb + wrapNdl * sunIntensity * (1.0 - amb) * uniforms.sunColor.rgb);
+    float dist = distance(worldPos, uniforms.cameraPos.xyz);
+    float dens = uniforms.fogColor.w;
+    float f = 1.0 - exp(-dens * dens * dist * dist);
+    return mix(lit, uniforms.fogColor.rgb, clamp(f, 0.0, 1.0));
+}
+
 fragment float4 road_fragment(MTRoadVaryings in [[stage_in]],
                               constant MTUniforms &uniforms [[buffer(1)]]) {
     float kind = in.kind;
@@ -472,17 +487,3 @@ fragment float4 road_fragment(MTRoadVaryings in [[stage_in]],
     return float4(applyRoadLighting(col, in.worldPos, uniforms), 1.0);
 }
 
-/// Simple NdotL + ambient lighting for road surfaces, matching terrain.
-inline float3 applyRoadLighting(float3 albedo, float3 worldPos, constant MTUniforms &uniforms) {
-    float3 up = float3(0.0, 1.0, 0.0);  // roads are near-flat
-    float3 lightDir = normalize(uniforms.lightDir.xyz);
-    float ndl = dot(up, lightDir);
-    float wrapNdl = clamp((ndl + 0.4) / 1.4, 0.0, 1.0);
-    float amb = uniforms.lightDir.w;
-    float sunIntensity = uniforms.seaLevel.y;
-    float3 lit = albedo * (amb + wrapNdl * sunIntensity * (1.0 - amb) * uniforms.sunColor.rgb);
-    float dist = distance(worldPos, uniforms.cameraPos.xyz);
-    float dens = uniforms.fogColor.w;
-    float f = 1.0 - exp(-dens * dens * dist * dist);
-    return mix(lit, uniforms.fogColor.rgb, clamp(f, 0.0, 1.0));
-}
