@@ -339,12 +339,6 @@ public final class MTTerrainRenderer {
             meshCompute = MTMeshCompute(device: device, heightmap: hc)
         }
         loadStructureMeshes()
-        // v1.3.0: volcano lava particles (seeded with the world seed).
-        lava = MTLavaParticles(seed: world.seed)
-        // v1.3.0: warm the volcano cache off the main thread — detection
-        // does ~2K noise evals; don't hitch the first frame.
-        let w = world
-        DispatchQueue.global(qos: .utility).async { _ = w.volcanoVents }
         // Skybox works on all devices (standard Metal 3).
         self.skybox = MTSkybox(device: device)
         #if M3_FEATURES
@@ -380,18 +374,6 @@ public final class MTTerrainRenderer {
             updateTimeOfDay(dt: Float(now - last))
         }
         lastUpdateTime = now
-        // v1.3.0: advance volcano lava simulation (cheap when no volcanoes).
-        if let lava = lava {
-            let ldt: Float
-            if let lastLava = lastLavaTime {
-                ldt = Float(now - lastLava)
-            } else {
-                ldt = 1.0 / 60.0
-            }
-            lastLavaTime = now
-            lavaTime += ldt
-            lava.update(dt: ldt, world: world, cameraTarget: cameraTarget)
-        }
         // If the user replaced `world.config`, drop stale chunk meshes and
         // rebuild the water plane (its size/level come from the config).
         let version = world.configVersion
@@ -433,6 +415,7 @@ public final class MTTerrainRenderer {
         // see-through holes during fast movement.
         for coord in chunkCache.keys where Self.chebyshev(coord, center) > radius + 1 {
             chunkCache.removeValue(forKey: coord)
+            roadCache.removeValue(forKey: coord)  // v1.3.0: roads go with terrain
         }
         // LRU cap: never hold more than the visible square plus the 1-chunk
         // eviction buffer, with an absolute ceiling so a large viewDistance
@@ -443,7 +426,10 @@ public final class MTTerrainRenderer {
                 .sorted { $0.value.lastUsed < $1.value.lastUsed }
                 .prefix(chunkCache.count - cap)
                 .map { $0.key }
-            for coord in oldest { chunkCache.removeValue(forKey: coord) }
+            for coord in oldest {
+                chunkCache.removeValue(forKey: coord)
+                roadCache.removeValue(forKey: coord)  // v1.3.0
+            }
         }
         for coord in needed {
             if var mesh = chunkCache[coord] {
@@ -702,59 +688,23 @@ public final class MTTerrainRenderer {
             encoder.setCullMode(.back)  // restore for water/terrain
         }
 
-        // v1.3.0: volcano lava billboards (additive, emissive).
-        // v1.3.0-refine: crater lava pools appended (bubbling discs).
-        // Skipped for reflections; depth-tested but doesn't write depth.
-        if includeStructures, let lavaPipeline = lavaPipeline,
-           let lava = lava {
-            var instances = lava.renderInstances()
-            instances.append(contentsOf: lava.poolInstances(
-                time: lavaTime, cameraTarget: lastCameraTarget))
-            if !instances.isEmpty {
-                // Reusable instance buffer (avoids per-frame allocation).
-                let need = instances.count * 32
-                if lavaInstanceBuffer == nil
-                    || (lavaInstanceBuffer?.length ?? 0) < need {
-                    lavaInstanceBuffer = device.makeBuffer(
-                        length: 320 * 32, options: .storageModeShared)
-                }
-                if let ib = lavaInstanceBuffer {
-                    let ptr = ib.contents().assumingMemoryBound(to: SIMD4<Float>.self)
-                    for (idx, inst) in instances.enumerated() {
-                        ptr[idx * 2] = SIMD4<Float>(inst.position, inst.size)
-                        ptr[idx * 2 + 1] = SIMD4<Float>(inst.kind, inst.heat, 0, 0)
-                    }
-                    // Pool FX uniforms: sim time + up to 3 landing ripples.
-                    if lavaFXBuffer == nil {
-                        lavaFXBuffer = device.makeBuffer(length: 64,
-                                                         options: .storageModeShared)
-                    }
-                    if let fx = lavaFXBuffer {
-                        let fp = fx.contents().assumingMemoryBound(to: SIMD4<Float>.self)
-                        fp[0] = SIMD4<Float>(lavaTime, 0, 0, 0)
-                        for k in 0..<3 {
-                            if k < lava.ripples.count {
-                                let rp = lava.ripples[k]
-                                fp[k + 1] = SIMD4<Float>(rp.center.x, rp.center.y,
-                                                         rp.startTime, 0)
-                            } else {
-                                fp[k + 1] = SIMD4<Float>(0, 0, -100, 0)
-                            }
-                        }
-                        encoder.setFragmentBuffer(fx, offset: 0, index: 2)
-                    }
-                    encoder.setRenderPipelineState(lavaPipeline)
-                    encoder.setDepthStencilState(waterDepthState)
-                    bindUniforms(encoder, slot: terrainSlot)
-                    encoder.setVertexBuffer(ib, offset: 0, index: 0)
-                    encoder.drawPrimitives(type: .triangle,
-                                           vertexStart: 0, vertexCount: 4,
-                                           instanceCount: instances.count)
-                    // Restore state for water.
-                    encoder.setDepthStencilState(depthState)
-                    encoder.setCullMode(.back)
-                }
+        // v1.3.0: roads — 1 draw call per chunk with cached road geometry.
+        // Drawn after terrain/structures, before water. Depth-tested so
+        // bridges span water and roads tuck under overpasses correctly.
+        if let roadPipeline = roadPipeline {
+            encoder.setRenderPipelineState(roadPipeline)
+            bindUniforms(encoder, slot: terrainSlot)
+            cacheLock.lock()
+            for road in roadCache.values {
+                guard frustum.intersects(min: road.boundsMin, max: road.boundsMax) else { continue }
+                encoder.setVertexBuffer(road.vertexBuffer, offset: 0, index: 0)
+                encoder.drawIndexedPrimitives(type: .triangle,
+                                              indexCount: road.indexCount,
+                                              indexType: .uint32,
+                                              indexBuffer: road.indexBuffer,
+                                              indexBufferOffset: 0)
             }
+            cacheLock.unlock()
         }
 
         // 1 draw for water, blended, drawn last (skipped for reflections).
@@ -983,8 +933,8 @@ public final class MTTerrainRenderer {
     private var terrainPipeline: MTLRenderPipelineState!
     private var waterPipeline: MTLRenderPipelineState!
     private var structurePipeline: MTLRenderPipelineState!
-    /// v1.3.0: additive-blended lava billboard pipeline (nil if shader missing).
-    private var lavaPipeline: MTLRenderPipelineState?
+    /// v1.3.0: road rendering pipeline (nil if road shaders missing).
+    private var roadPipeline: MTLRenderPipelineState?
     #if M3_FEATURES
     /// Ray-traced shadow variant of the terrain pipeline. Nil when the
     /// RT fragment function failed to compile; falls back to terrainPipeline.
@@ -1040,6 +990,15 @@ public final class MTTerrainRenderer {
         #endif
     }
 
+    /// v1.3.0: baked road geometry for one chunk (GPU buffers).
+    private struct RoadMeshGPU {
+        var vertexBuffer: MTLBuffer
+        var indexBuffer: MTLBuffer
+        var indexCount: Int
+        var boundsMin: SIMD3<Float>
+        var boundsMax: SIMD3<Float>
+    }
+
     /// Camera frustum planes extracted from the view-projection matrix.
     /// Each plane is (normal.xyz, distance): points with dot(n, p) + d > 0
     /// are inside.
@@ -1084,6 +1043,8 @@ public final class MTTerrainRenderer {
         return len > 0 ? p / len : p
     }
     private var chunkCache: [MTChunkCoord: ChunkMesh] = [:]
+    /// v1.3.0: per-chunk baked road geometry (highways, ramps, streets, bridges).
+    private var roadCache: [MTChunkCoord: RoadMeshGPU] = [:]
     private var pendingBuilds = Set<MTChunkCoord>()
     private let cacheLock = NSLock()
     private let buildQueue = DispatchQueue(label: "com.MetalTerrain.meshBuild",
@@ -1095,20 +1056,6 @@ public final class MTTerrainRenderer {
     /// v1.2.6: GPU mesh builder (heightmap + vertices on GPU). Nil when
     /// the kernel is unavailable — buildChunkAsync uses the CPU path.
     private var meshCompute: MTMeshCompute?
-    /// v1.3.0: volcano lava particle simulation. Nil-safe: eruptions only
-    /// run when volcanoes exist; rendering skips when no instances.
-    private var lava: MTLavaParticles?
-    /// Last lava sim time (for dt in update).
-    private var lastLavaTime: Double?
-    /// v1.3.0-refine: accumulated lava clock (drives pool bubbling pulse).
-    private var lavaTime: Float = 0
-    /// v1.3.0: reusable lava instance buffer (320 max × 32 bytes:
-    /// 200 blobs + 100 deposits + 3 pools + headroom).
-    private var lavaInstanceBuffer: MTLBuffer?
-    /// Lava FX uniforms for the pool shader (fragment buffer 2):
-    /// 4 × float4 — [0].x = sim time, [1..3] = ripples (xy = world xz
-    /// center, z = start time; z < -50 means inactive).
-    private var lavaFXBuffer: MTLBuffer?
     // Generation counter: bumped by invalidateCaches(). Background builds
     // capture the generation at dispatch; if it changed by completion,
     // the mesh is stale (built from an old config) and must be dropped.
@@ -1221,24 +1168,11 @@ public final class MTTerrainRenderer {
                 descriptor: descriptor(vertex: "terrain_vertex", fragment: "water_fragment", blending: true))
             structurePipeline = try device.makeRenderPipelineState(
                 descriptor: descriptor(vertex: "structure_vertex", fragment: "structure_fragment", blending: false))
-            // v1.3.0: lava billboards — additive blending, emissive.
-            // Best-effort: nil when the shader is missing (older .metallib).
-            if library.makeFunction(name: "lava_vertex") != nil,
-               library.makeFunction(name: "lava_fragment") != nil {
-                let d = MTLRenderPipelineDescriptor()
-                d.vertexFunction = library.makeFunction(name: "lava_vertex")
-                d.fragmentFunction = library.makeFunction(name: "lava_fragment")
-                d.colorAttachments[0]?.pixelFormat = .bgra8Unorm
-                d.depthAttachmentPixelFormat = .depth32Float
-                let a = d.colorAttachments[0]!
-                a.isBlendingEnabled = true
-                a.rgbBlendOperation = .add
-                a.alphaBlendOperation = .add
-                a.sourceRGBBlendFactor = .one
-                a.destinationRGBBlendFactor = .one
-                a.sourceAlphaBlendFactor = .one
-                a.destinationAlphaBlendFactor = .one
-                lavaPipeline = try? device.makeRenderPipelineState(descriptor: d)
+            // v1.3.0: roads. Best-effort: nil when the shader is missing.
+            if library.makeFunction(name: "road_vertex") != nil,
+               library.makeFunction(name: "road_fragment") != nil {
+                roadPipeline = try device.makeRenderPipelineState(
+                    descriptor: descriptor(vertex: "road_vertex", fragment: "road_fragment", blending: false))
             }
             #if M3_FEATURES
             // Ray-traced shadow variant of the terrain pipeline. Best-effort:
@@ -1284,10 +1218,11 @@ public final class MTTerrainRenderer {
                                                    vertex: "structure_vertex",
                                                    fragment: "structure_fragment",
                                                    blending: false)
-            // v1.3.0: lava billboards (additive). Best-effort.
-            lavaPipeline = try? metal4AdditivePipeline(compiler: compiler, library: library,
-                                                       vertex: "lava_vertex",
-                                                       fragment: "lava_fragment")
+            // v1.3.0: roads (Metal 4). Best-effort.
+            roadPipeline = try? metal4Pipeline(compiler: compiler, library: library,
+                                               vertex: "road_vertex",
+                                               fragment: "road_fragment",
+                                               blending: false)
             return true
         } catch {
             return false
@@ -1328,37 +1263,6 @@ public final class MTTerrainRenderer {
         // encode time; MTL4RenderPipelineDescriptor carries no depth pixel
         // format. Depth testing still comes from the encoder's
         // depthStencilState + the MTKView's depth attachment.
-        return try compiler.makeRenderPipelineState(descriptor: d, compilerTaskOptions: nil)
-    }
-
-    /// v1.3.0: Metal 4 additive-blending pipeline (for lava billboards).
-    @available(iOS 26, macOS 26, *)
-    private func metal4AdditivePipeline(compiler: MTL4Compiler,
-                                        library: MTLLibrary,
-                                        vertex: String,
-                                        fragment: String) throws -> MTLRenderPipelineState {
-        let vDesc = MTL4LibraryFunctionDescriptor()
-        vDesc.library = library
-        vDesc.name = vertex
-        let fDesc = MTL4LibraryFunctionDescriptor()
-        fDesc.library = library
-        fDesc.name = fragment
-
-        let d = MTL4RenderPipelineDescriptor()
-        d.vertexFunctionDescriptor = vDesc
-        d.fragmentFunctionDescriptor = fDesc
-        d.inputPrimitiveTopology = .triangle
-        guard let color = d.colorAttachments[0] else {
-            preconditionFailure("MTTerrainRenderer: Metal 4 color attachment 0 missing")
-        }
-        color.pixelFormat = .bgra8Unorm
-        color.blendingState = .enabled
-        color.rgbBlendOperation = .add
-        color.alphaBlendOperation = .add
-        color.sourceRGBBlendFactor = .one
-        color.destinationRGBBlendFactor = .one
-        color.sourceAlphaBlendFactor = .one
-        color.destinationAlphaBlendFactor = .one
         return try compiler.makeRenderPipelineState(descriptor: d, compilerTaskOptions: nil)
     }
     #endif
@@ -1490,6 +1394,8 @@ public final class MTTerrainRenderer {
                             self.chunkCache[coord]?.lodStride = distanceFactor > 0.4 ? 2 : 1
                             #endif
                         }
+                        // v1.3.0: bake road geometry for this chunk.
+                        self.buildRoads(for: coord, size: size, generation: generation)
                         self.pendingBuilds.remove(coord)
                         self.cacheLock.unlock()
                         return
@@ -1534,9 +1440,36 @@ public final class MTTerrainRenderer {
                 self.chunkCache[coord]?.lodStride = distanceFactor > 0.4 ? 2 : 1
                 #endif
             }
+            // v1.3.0: bake road geometry for this chunk.
+            self.buildRoads(for: coord, size: size, generation: generation)
             self.pendingBuilds.remove(coord)
             self.cacheLock.unlock()
         }
+    }
+
+    // MARK: - Roads (v1.3.0)
+
+    /// Build and cache road geometry for a chunk. Called on the build queue
+    /// after the terrain mesh is cached. Roads are queried from the
+    /// deterministic road network, so neighboring chunks agree on shared
+    /// segments without any cross-chunk communication.
+    private func buildRoads(for coord: MTChunkCoord, size: Float, generation: UInt64) {
+        let x0 = Float(coord.x) * size
+        let z0 = Float(coord.z) * size
+        let paths = world.roadNetwork.roads(minX: x0, minZ: z0, maxX: x0 + size, maxZ: z0 + size)
+        guard !paths.isEmpty else { return }
+        let mesh = MTRoadGeometry.build(paths: paths, world: world)
+        guard !mesh.isEmpty,
+              let vb = sharedBuffer(from: mesh.vertices),
+              let ib = sharedBuffer(from: mesh.indices) else { return }
+        cacheLock.lock()
+        if generation == buildGeneration {
+            roadCache[coord] = RoadMeshGPU(
+                vertexBuffer: vb, indexBuffer: ib,
+                indexCount: mesh.indices.count,
+                boundsMin: mesh.boundsMin, boundsMax: mesh.boundsMax)
+        }
+        cacheLock.unlock()
     }
 
     private func sharedBuffer<T>(from array: [T]) -> MTLBuffer? {
@@ -1576,14 +1509,6 @@ public final class MTTerrainRenderer {
         sharedIndexBufferLock.unlock()
         structureChunkSet = []
         clearStructureInstances()
-        // v1.3.0: new seed/config → fresh lava state.
-        lava?.reset(seed: world.seed)
-    }
-
-    /// v1.3.0: is there lethal lava at a world position? For the app's
-    /// player-death check. False when the lava system is unavailable.
-    public func isLavaAt(_ position: SIMD3<Float>) -> Bool {
-        lava?.isLavaAt(position) ?? false
     }
 
     // MARK: Water

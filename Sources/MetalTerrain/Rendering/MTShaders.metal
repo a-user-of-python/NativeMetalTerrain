@@ -336,158 +336,6 @@ fragment float4 structure_fragment(MTVaryings in [[stage_in]],
     return float4(col, 1.0);
 }
 
-// v1.3.0: volcano lava billboards. Procedural quad (vertex_id corners),
-// one instance per lava blob/deposit. Additive blending, emissive —
-// visible day and night, no lighting needed.
-struct MTLavaInstance {
-    float4 posSize;   // xyz = world center, w = half-size (world units)
-    float4 kindHeat;  // x = 0 blob / 1 deposit, y = heat 0..1
-};
-
-struct MTLavaVaryings {
-    float4 clipPos [[position]];
-    float2 uv;     // -1..1 quad coords
-    float  heat;
-    float  kind;   // 0 = blob, 1 = deposit, 2 = crater pool
-    float3 worldPos;
-    float3 domeN;  // dome normal (pools only; up otherwise)
-};
-
-// Hash-based value noise for the lava crust texture (no texture fetch).
-inline float lavaHash(float2 p) {
-    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
-}
-inline float lavaNoise(float2 p) {
-    float2 i = floor(p);
-    float2 f = fract(p);
-    float2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(lavaHash(i), lavaHash(i + float2(1.0, 0.0)), u.x),
-               mix(lavaHash(i + float2(0.0, 1.0)), lavaHash(i + float2(1.0, 1.0)), u.x),
-               u.y);
-}
-inline float lavaFbm(float2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int k = 0; k < 3; k++) {
-        v += a * lavaNoise(p);
-        p = p * 2.03 + float2(19.7, 7.3);
-        a *= 0.5;
-    }
-    return v;
-}
-
-vertex MTLavaVaryings lava_vertex(const device MTLavaInstance *instances [[buffer(0)]],
-                                  constant MTUniforms &uniforms [[buffer(1)]],
-                                  uint vid [[vertex_id]],
-                                  uint iid [[instance_id]]) {
-    MTLavaInstance inst = instances[iid];
-    float3 center = inst.posSize.xyz;
-    float size = inst.posSize.w;
-    // Quad corners for a triangle strip: (-1,-1), (1,-1), (-1,1), (1,1).
-    float2 corner = float2((vid & 1u) ? 1.0 : -1.0,
-                           (vid & 2u) ? 1.0 : -1.0);
-    float3 world;
-    float3 domeN = float3(0.0, 1.0, 0.0);
-    if (inst.kindHeat.x < 0.5) {
-        // Blob: camera-facing billboard.
-        float3 look = normalize(uniforms.cameraPos.xyz - center + float3(0.0, 0.001, 0.0));
-        float3 right = normalize(cross(float3(0.0, 1.0, 0.0), look));
-        float3 up = cross(look, right);
-        world = center + (right * corner.x + up * corner.y) * size;
-    } else if (inst.kindHeat.x < 1.5) {
-        // Deposit: flat disc lying on the terrain (XZ plane).
-        world = center + float3(corner.x, 0.0, corner.y) * size;
-    } else {
-        // Pool: domed disc — liquid mounded in the crater bowl.
-        // Dome height peaks at the center and falls to zero at the rim,
-        // so the edge meets the crater wall cleanly with no gap/overlap.
-        float r2 = dot(corner, corner);  // 0 center → 1 at disc rim
-        world = center + float3(corner.x, 0.0, corner.y) * size;
-        world.y += (1.0 - r2) * size * 0.06;
-        // Cheap analytic dome normal for a hint of curvature shading.
-        domeN = normalize(float3(-corner.x * 0.18, 1.0, -corner.y * 0.18));
-    }
-    MTLavaVaryings out;
-    out.clipPos = uniforms.viewProj * float4(world, 1.0);
-    out.uv = corner;
-    out.heat = inst.kindHeat.y;
-    out.kind = inst.kindHeat.x;
-    out.worldPos = world;
-    out.domeN = domeN;
-    return out;
-}
-
-// Lava FX uniforms (fragment buffer 2):
-//   lavaFX[0].x = sim time seconds
-//   lavaFX[1..3] = ripples, .xy = world-xz center, .z = start time
-//                  (startTime < -50 means inactive)
-fragment float4 lava_fragment(MTLavaVaryings in [[stage_in]],
-                              constant float4 *lavaFX [[buffer(2)]]) {
-    float time = lavaFX[0].x;
-    float r = length(in.uv);  // 0 at center → ~1.41 at corners
-    float falloff = clamp(1.0 - r, 0.0, 1.0);
-    falloff *= falloff;
-    float alpha = falloff * (0.30 + 0.70 * in.heat);
-
-    if (in.kind > 1.5) {
-        // ---- Crater pool: pahoehoe lava with drifting crust ----
-        // World-stable coords so the texture doesn't swim with the camera.
-        float2 lp = in.worldPos.xz * 0.055;
-        // Slow drift + counter-drift: crust plates break apart and reform.
-        float2 drift = float2(time * 0.016, time * 0.011);
-        float n = lavaFbm(lp * 3.0 + drift * 3.0);
-        float n2 = lavaFbm(lp * 3.0 - drift * 2.0 + 5.2);
-        // Dark solidified crust where noise is high; glowing cracks between.
-        float crust = smoothstep(0.38, 0.68, n);
-        float crackGlow = 1.0 - smoothstep(0.30, 0.62, n2);
-        float3 crustCol = float3(0.11, 0.085, 0.075);
-        float3 crackHot = mix(float3(1.0, 0.28, 0.03),
-                              float3(1.0, 0.72, 0.22), crackGlow);
-        float3 col = mix(crackHot, crustCol, crust * 0.88);
-        // Emissive: rich orange-red, never blown out to white.
-        col *= (0.85 + 1.15 * in.heat);
-        // Gentle ambient surface waves.
-        float wv = sin(dot(in.worldPos.xz, float2(0.20, 0.13)) + time * 0.9)
-                 * sin(dot(in.worldPos.xz, float2(-0.11, 0.17)) + time * 0.7);
-        col *= 1.0 + wv * 0.06;
-        // Blob-landing ripples: expanding bright rings, fading over ~3s.
-        for (int k = 1; k <= 3; k++) {
-            float4 rp = lavaFX[k];
-            float age = time - rp.z;
-            if (age > 0.0 && age < 3.0) {
-                float d = distance(in.worldPos.xz, rp.xy);
-                float waveR = age * 12.0;
-                float ring = sin((d - waveR) * 2.2)
-                           * exp(-abs(d - waveR) * 0.30)
-                           * exp(-age * 1.2);
-                col += float3(1.0, 0.45, 0.12) * max(ring, 0.0) * 0.9;
-            }
-        }
-        // Dome curvature shading: subtle light response on the mound.
-        float ndl = max(dot(in.domeN, normalize(float3(0.35, 0.85, 0.30))), 0.0);
-        col *= 0.82 + 0.36 * ndl;
-        // Fade the very rim so the pool melts into the crater wall.
-        alpha *= 1.0 - smoothstep(0.82, 1.0, r);
-        return float4(col * alpha, alpha);
-    }
-
-    // Hot yellow-white core → orange → deep red edge.
-    float3 hot  = float3(1.0, 0.85, 0.30);
-    float3 mid  = float3(1.0, 0.35, 0.05);
-    float3 cool = float3(0.45, 0.05, 0.01);
-    float3 col = mix(cool, mix(mid, hot, falloff), falloff);
-    // Emissive boost so lava glows at night (additive blending).
-    // Kept modest so lava reads orange-red, not blown-out white.
-    col *= (0.8 + 1.2 * in.heat);
-    if (in.kind > 0.5) {
-        // Deposits cool to black rock as heat fades.
-        float coolT = 1.0 - in.heat;
-        float3 cooled = float3(0.09, 0.085, 0.09);
-        col = mix(col, cooled, coolT * coolT * 0.95);
-    }
-    return float4(col * alpha, alpha);
-}
-
 #ifdef M3_FEATURES
 // ---- Hardware ray-traced sun shadows (M3+/A17 Pro+) ----
 // Bind the TLAS with `encoder.setFragmentAccelerationStructure(tlas, at: 3)`.
@@ -536,3 +384,105 @@ fragment float4 terrain_fragment_rt(MTVaryings in [[stage_in]],
 }
 #endif // M3_FEATURES
 
+// Road shaders — appended to MTShaders.metal after volcano removal.
+// Must match MTRoadVertex in MTRoadGeometry.swift (32 bytes):
+//   float4 position (xyz = world pos), float2 uv, float kind, float bridge.
+
+struct MTRoadVertexIn {
+    float4 position;
+    float2 uv;      // u = meters along road, v = -1...1 across
+    float kind;     // 0 = highway, 1 = ramp, 2 = street, 3 = pillar
+    float bridge;   // 1 on bridge decks/pillars
+};
+
+struct MTRoadVaryings {
+    float4 clipPos [[position]];
+    float2 uv;
+    float kind;
+    float bridge;
+    float3 worldPos;
+};
+
+vertex MTRoadVaryings road_vertex(const device MTRoadVertexIn *verts [[buffer(0)]],
+                                  uint vid [[vertex_id]],
+                                  constant MTUniforms &uniforms [[buffer(1)]]) {
+    MTRoadVertexIn v = verts[vid];
+    MTRoadVaryings out;
+    out.clipPos = uniforms.viewProj * uniforms.model * float4(v.position.xyz, 1.0);
+    out.uv = v.uv;
+    out.kind = v.kind;
+    out.bridge = v.bridge;
+    out.worldPos = v.position.xyz;
+    return out;
+}
+
+// Procedural lane markings. v in [-1, 1] across the road.
+fragment float4 road_fragment(MTRoadVaryings in [[stage_in]],
+                              constant MTUniforms &uniforms [[buffer(1)]]) {
+    float kind = in.kind;
+    float u = in.uv.x;
+    float v = in.uv.y;
+    float av = abs(v);
+
+    // Base asphalt.
+    float3 asphalt = float3(0.16, 0.16, 0.17);
+    // Subtle noise variation so large areas don't look flat.
+    float n = fract(sin(dot(floor(in.worldPos.xz * 0.5), float2(12.9898, 78.233))) * 43758.5453);
+    asphalt *= 0.92 + 0.16 * n;
+
+    // Pillars: plain concrete.
+    if (kind > 2.5) {
+        float3 concrete = float3(0.45, 0.44, 0.42) * (0.9 + 0.2 * n);
+        return float4(applyRoadLighting(concrete, in.worldPos, uniforms), 1.0);
+    }
+
+    float3 col = asphalt;
+    float dash = step(fract(u / 6.0), 0.55);  // 3.3m dash, 2.7m gap
+
+    if (kind < 0.5) {
+        // Highway: 4 lanes. Median strip |v| < 0.07, lane dividers at ±0.36,
+        // edge lines at |v| in [0.93, 1.0].
+        if (av < 0.07) {
+            col = float3(0.42, 0.42, 0.40);  // concrete median
+        } else {
+            float div = 0.0;
+            div = max(div, (1.0 - smoothstep(0.008, 0.02, abs(av - 0.36))) * dash);
+            div = max(div, (1.0 - smoothstep(0.008, 0.02, abs(av - 0.72))) * dash);
+            float edge = 1.0 - smoothstep(0.015, 0.035, abs(av - 0.965));
+            float marking = max(div, edge);
+            col = mix(col, float3(0.85, 0.85, 0.82), marking);
+        }
+    } else if (kind < 1.5) {
+        // Ramp: edge lines only.
+        float edge = 1.0 - smoothstep(0.015, 0.035, abs(av - 0.93));
+        col = mix(col, float3(0.85, 0.85, 0.82), edge);
+    } else {
+        // Street: 2 lanes, dashed yellow center.
+        float centerLine = (1.0 - smoothstep(0.008, 0.02, av)) * dash;
+        float edge = 1.0 - smoothstep(0.015, 0.035, abs(av - 0.93));
+        col = mix(col, float3(0.85, 0.70, 0.20), centerLine);
+        col = mix(col, float3(0.85, 0.85, 0.82), edge * (1.0 - centerLine));
+    }
+
+    // Bridge decks: slightly lighter + railing tint at edges.
+    if (in.bridge > 0.5 && kind < 2.5) {
+        col *= 1.12;
+    }
+
+    return float4(applyRoadLighting(col, in.worldPos, uniforms), 1.0);
+}
+
+/// Simple NdotL + ambient lighting for road surfaces, matching terrain.
+inline float3 applyRoadLighting(float3 albedo, float3 worldPos, constant MTUniforms &uniforms) {
+    float3 up = float3(0.0, 1.0, 0.0);  // roads are near-flat
+    float3 lightDir = normalize(uniforms.lightDir.xyz);
+    float ndl = dot(up, lightDir);
+    float wrapNdl = clamp((ndl + 0.4) / 1.4, 0.0, 1.0);
+    float amb = uniforms.lightDir.w;
+    float sunIntensity = uniforms.seaLevel.y;
+    float3 lit = albedo * (amb + wrapNdl * sunIntensity * (1.0 - amb) * uniforms.sunColor.rgb);
+    float dist = distance(worldPos, uniforms.cameraPos.xyz);
+    float dens = uniforms.fogColor.w;
+    float f = 1.0 - exp(-dens * dens * dist * dist);
+    return mix(lit, uniforms.fogColor.rgb, clamp(f, 0.0, 1.0));
+}

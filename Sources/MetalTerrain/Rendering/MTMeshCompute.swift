@@ -15,7 +15,7 @@ import simd
 
 /// Parameter block for `mtMeshKernel`.
 /// Layout must match `MeshParams` in MTMeshCompute.metal exactly:
-/// 7 floats + 3 uints = 40 bytes.
+/// 7 floats + 2 uints = 36 bytes.
 private struct MeshParams {
     var x0: Float
     var z0: Float
@@ -26,7 +26,6 @@ private struct MeshParams {
     var pad0: Float
     var res: UInt32
     var biomeCount: UInt32
-    var ventCount: UInt32
 }
 
 /// One biome slot for the kernel.
@@ -106,8 +105,7 @@ final class MTMeshCompute {
         guard let heightsBuf = heightmap.generateHeightsBuffer(
                 x0: x0 - step, z0: z0 - step, step: step, res: pres,
                 field: field, seed: world.seed,
-                noise: noise, warpNoise: warpNoise,
-                vents: world.volcanoVents) else {
+                noise: noise, warpNoise: warpNoise) else {
             return nil
         }
 
@@ -138,18 +136,7 @@ final class MTMeshCompute {
             skirtDepth: heightScale * 0.35 + 10,
             pad0: 0,
             res: UInt32(res),
-            biomeCount: UInt32(biomes.count),
-            ventCount: UInt32(min(world.volcanoVents.count, 8)))
-
-        // v1.3.0-refine: volcano vent XZ positions for volcanic rock
-        // coloring (max 8, matches the heightmap kernel).
-        var ventPos = world.volcanoVents.prefix(8).map { $0.position }
-        if ventPos.isEmpty { ventPos = [SIMD2<Float>(0, 0)] }
-        guard let ventBuffer = ventPos.withUnsafeBytes({ ptr in
-            device.makeBuffer(bytes: ptr.baseAddress!,
-                              length: ptr.count,
-                              options: .storageModeShared)
-        }) else { return nil }
+            biomeCount: UInt32(biomes.count))
 
         // Main vertices + skirt vertices, 20 bytes each.
         let totalVerts = res * res + 4 * res - 4
@@ -169,7 +156,6 @@ final class MTMeshCompute {
         encoder.setBuffer(heightsBuf, offset: 0, index: 1)
         encoder.setBuffer(biomeBuffer, offset: 0, index: 2)
         encoder.setBuffer(outBuffer, offset: 0, index: 3)
-        encoder.setBuffer(ventBuffer, offset: 0, index: 4)
 
         let tpt = 256
         let groups = MTLSize(width: (totalVerts + tpt - 1) / tpt,

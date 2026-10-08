@@ -18,7 +18,7 @@
 using namespace metal;
 
 // Must match HeightmapParams in MTHeightmapCompute.swift exactly:
-// 13 floats followed by 9 uints.
+// 13 floats followed by 8 uints.
 struct HeightmapParams {
     float x0;
     float z0;
@@ -41,16 +41,6 @@ struct HeightmapParams {
     uint   riverOctaves;
     uint   baseRidged;   // 1 = ridged detail, 0 = fbm detail
     uint   doWarp;       // 1 = domain warp enabled
-    uint   ventCount;    // v1.3.0: number of volcano vents in vents buffer
-};
-
-// v1.3.0: volcano vent for crater carving. Must match the Swift
-// MTVolcanoVentGPU layout (float2 + float + float + float = 20 bytes).
-struct MTVolcanoVentGPU {
-    float2 pos;      // world XZ of crater center
-    float  radius;   // crater radius, world units
-    float  depth;    // normalized depth subtracted at center
-    float  peakHeight; // v1.3.0-refine: normalized peak height (cone shaping)
 };
 
 // MARK: - Perlin gradient noise (port of MTPerlinNoise.noise)
@@ -245,45 +235,12 @@ kernel void mtHeightmapKernel(
     constant uint            *warpPerm [[buffer(2)]],
     constant float           *lut      [[buffer(3)]],
     device ushort            *out      [[buffer(4)]],
-    constant MTVolcanoVentGPU *vents   [[buffer(5)]],
     uint2 gid [[thread_position_in_grid]])
 {
     if (gid.x >= p.res || gid.y >= p.res) { return; }
     float x = p.x0 + (float)gid.x * p.step;
     float y = p.z0 + (float)gid.y * p.step;
     float h = heightSample(x, y, p, perm, warpPerm, lut);
-    // v1.3.0: carve volcano craters. Wobbled edge for a natural look.
-    // v1.3.0-refine: volcanic cone shaping first (regularizes slopes
-    // toward an idealized cone within 4x crater radius), then carve.
-    for (uint v = 0; v < p.ventCount; v++) {
-        float2 d = float2(x, y) - vents[v].pos;
-        float dist = length(d);
-        float r = vents[v].radius;
-        float coneR = r * 4.0;
-        if (dist < coneR) {
-            float t = dist / coneR;
-            float coneH = vents[v].peakHeight * pow(1.0 - t, 1.25);
-            float w = 0.45 * (1.0 - t) * (1.0 - t);
-            // Fade the cone blend to zero inside the crater bowl so the
-            // carve below produces a clean hole (no fill-in).
-            float craterT = clamp((dist - r * 0.8) / (r * 0.5), 0.0, 1.0);
-            w *= craterT;
-            h = h * (1.0 - w) + coneH * w;
-        }
-        if (dist < r * 1.35) {
-            float ang = atan2(d.y, d.x);
-            float wobble = 1.0 + 0.22 * sin(ang * 3.0 + vents[v].pos.x)
-                                       * sin(ang * 5.0 + vents[v].pos.y);
-            float t = clamp(dist / (r * wobble), 0.0, 1.0);
-            float delta;
-            if (t < 1.0) {
-                delta = -(1.0 - t * t) * vents[v].depth;
-            } else {
-                delta = 0.15 * vents[v].depth * (1.0 - (t - 1.0) / 0.35);
-            }
-            h = clamp(h + delta, 0.0, 1.0);
-        }
-    }
     float hf = (float)h;
     out[(uint)gid.y * p.res + (uint)gid.x] = (ushort)round(hf * 65535.0f);
 }

@@ -20,7 +20,7 @@
 using namespace metal;
 
 // Must match MeshParams in MTMeshCompute.swift exactly:
-// 7 floats + 3 uints = 40 bytes.
+// 7 floats + 2 uints = 36 bytes.
 struct MeshParams {
     float x0;          // chunk world origin X
     float z0;          // chunk world origin Z
@@ -31,7 +31,6 @@ struct MeshParams {
     float  _pad0;
     uint   res;         // vertices per side (n)
     uint   biomeCount;
-    uint   ventCount;   // v1.3.0-refine: volcano vents in ventPos buffer
 };
 
 // One biome slot. Must match GPUBiomeParams in MTMeshCompute.swift:
@@ -146,29 +145,6 @@ inline void meshGroundColor(float h, float normalY,
     rgb = color;
 }
 
-// v1.3.0-refine: volcanic rock coloring. Must match MTMeshBuilder.
-// Returns 0...1 volcanic influence: 1 at the vent, 0 beyond 500m.
-inline float volcanicBlend(float2 wpos, constant float2 *ventPos, uint ventCount) {
-    if (ventCount == 0u) { return 0.0f; }
-    float minD = 1e9f;
-    for (uint i = 0u; i < ventCount; i++) {
-        minD = min(minD, distance(wpos, ventPos[i]));
-    }
-    if (minD >= 500.0f) { return 0.0f; }
-    float t = clamp(minD / 500.0f, 0.0f, 1.0f);
-    return 1.0f - t * t * (3.0f - 2.0f * t);
-}
-
-// Dark basalt with ash variation (hash of world pos for texture).
-inline float3 basaltColor(float2 wpos) {
-    float n = fract(sin(dot(wpos, float2(12.9898f, 78.233f))) * 43758.5453f);
-    float ash = fract(sin(dot(wpos, float2(3.7f, 9.1f))) * 24634.6345f);
-    if (ash > 0.97f) {
-        return float3(0.18f, 0.17f, 0.16f) * (0.85f + 0.3f * n);
-    }
-    return float3(0.10f, 0.095f, 0.105f) * (0.8f + 0.4f * n);
-}
-
 // MARK: - Kernel
 
 kernel void mtMeshKernel(
@@ -176,7 +152,6 @@ kernel void mtMeshKernel(
     device const ushort   *heights [[buffer(1)]],  // (res+2)^2 padded
     constant GPUBiome     *biomes  [[buffer(2)]],
     device MeshVertexOut  *out     [[buffer(3)]],
-    constant float2       *ventPos [[buffer(4)]],  // v1.3.0-refine: vent XZ
     uint gid [[thread_position_in_grid]])
 {
     uint n = p.res;
@@ -226,17 +201,6 @@ kernel void mtMeshKernel(
     float3 rgb;
     float material;
     meshGroundColor(h, normal.y, biomes, p.biomeCount, rgb, material);
-
-    // v1.3.0-refine: volcanic terrain — dark basalt near vents, no snow
-    // cap on the cone. Must match MTMeshBuilder.groundColor.
-    float volcT = volcanicBlend(float2(wx, wz), ventPos, p.ventCount);
-    if (volcT > 0.75f) {
-        rgb = basaltColor(float2(wx, wz));
-        material = 1.0f;
-    } else if (volcT > 0.0f) {
-        rgb = mix(rgb, basaltColor(float2(wx, wz)), volcT * 0.9f);
-        if (volcT > 0.45f) { material = 1.0f; }
-    }
 
     MeshVertexOut v;
     if (!isSkirt) {

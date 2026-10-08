@@ -17,7 +17,7 @@ import Foundation
 
 /// Parameter block for `mtHeightmapKernel`.
 /// Layout must match `HeightmapParams` in MTHeightmapCompute.metal exactly:
-/// 13 floats followed by 9 uints.
+/// 13 floats followed by 8 uints.
 private struct HeightmapParams {
     var x0: Float
     var z0: Float
@@ -40,16 +40,6 @@ private struct HeightmapParams {
     var riverOctaves: UInt32
     var baseRidged: UInt32
     var doWarp: UInt32
-    var ventCount: UInt32  // v1.3.0
-}
-
-/// GPU vent layout. Must match `MTVolcanoVentGPU` in MTHeightmapCompute.metal
-/// (float2 + float + float + float = 20 bytes).
-private struct MTVolcanoVentGPU {
-    var pos: SIMD2<Float>
-    var radius: Float
-    var depth: Float
-    var peakHeight: Float
 }
 
 /// GPU heightmap generator. Internal: owned by the renderer, handed to
@@ -108,12 +98,10 @@ final class MTHeightmapCompute {
                          field: MTHeightFieldConfig,
                          seed: UInt64,
                          noise: MTPerlinNoise,
-                         warpNoise: MTPerlinNoise,
-                         vents: [MTTerrainWorld.MTVolcanoVent] = []) -> [UInt16]? {
+                         warpNoise: MTPerlinNoise) -> [UInt16]? {
         guard let outBuffer = generateHeightsBuffer(
                 x0: x0, z0: z0, step: step, res: res, field: field,
-                seed: seed, noise: noise, warpNoise: warpNoise,
-                vents: vents) else {
+                seed: seed, noise: noise, warpNoise: warpNoise) else {
             return nil
         }
         let ptr = outBuffer.contents().assumingMemoryBound(to: UInt16.self)
@@ -128,8 +116,7 @@ final class MTHeightmapCompute {
                                field: MTHeightFieldConfig,
                                seed: UInt64,
                                noise: MTPerlinNoise,
-                               warpNoise: MTPerlinNoise,
-                               vents: [MTTerrainWorld.MTVolcanoVent] = []) -> MTLBuffer? {
+                               warpNoise: MTPerlinNoise) -> MTLBuffer? {
         guard res >= 2 else { return nil }
 
         // Refresh the permutation-table buffers when the seed changes.
@@ -182,21 +169,8 @@ final class MTHeightmapCompute {
             rangeOctaves: UInt32(field.rangeOctaves),
             riverOctaves: UInt32(field.riverOctaves),
             baseRidged: base.ridged ? 1 : 0,
-            doWarp: field.doWarp ? 1 : 0,
-            ventCount: UInt32(min(vents.count, 8))
+            doWarp: field.doWarp ? 1 : 0
         )
-
-        // v1.3.0: volcano vent buffer (max 8). Empty buffer when no vents —
-        // the kernel loops zero times.
-        let gpuVents = vents.prefix(8).map {
-            MTVolcanoVentGPU(pos: $0.position, radius: $0.craterRadius,
-                             depth: $0.craterDepth, peakHeight: $0.peakHeight)
-        }
-        var ventArray = Array(gpuVents)
-        if ventArray.isEmpty {
-            ventArray.append(MTVolcanoVentGPU(pos: SIMD2<Float>(0, 0),
-                                             radius: 0, depth: 0, peakHeight: 0))
-        }
 
         let outLength = res * res * MemoryLayout<UInt16>.stride
         guard let paramBuffer = device.makeBuffer(
@@ -205,11 +179,6 @@ final class MTHeightmapCompute {
                     options: .storageModeShared),
               let outBuffer = device.makeBuffer(length: outLength,
                                                options: .storageModeShared),
-              let ventBuffer = ventArray.withUnsafeBytes({ ptr in
-                  device.makeBuffer(bytes: ptr.baseAddress!,
-                                    length: ptr.count,
-                                    options: .storageModeShared)
-              }),
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else {
             return nil
@@ -220,7 +189,6 @@ final class MTHeightmapCompute {
         encoder.setBuffer(wb, offset: 0, index: 2)
         encoder.setBuffer(lutBuffer, offset: 0, index: 3)
         encoder.setBuffer(outBuffer, offset: 0, index: 4)
-        encoder.setBuffer(ventBuffer, offset: 0, index: 5)
 
         let tg = MTLSize(width: 16, height: 16, depth: 1)
         let groups = MTLSize(width: (res + 15) / 16,
