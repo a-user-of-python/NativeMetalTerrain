@@ -266,8 +266,8 @@ public final class MTTerrainWorld {
                 position: SIMD2<Float>(Float(bx), Float(bz)),
                 peakHeight: bh,
                 craterRadius: craterRadius,
-                craterDepth: 0.035,
-                ventY: worldY(forHeight: bh) - 0.035 * config.heightScale * 0.5
+                craterDepth: 0.08,
+                ventY: worldY(forHeight: bh) - 0.08 * config.heightScale * 0.5
             )
         }
     }

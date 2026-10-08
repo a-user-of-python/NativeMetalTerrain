@@ -105,10 +105,10 @@ public final class MTLavaParticles {
             if st.timer <= 0 {
                 st.erupting.toggle()
                 if st.erupting {
-                    st.timer = 3 + rng.nextFloat() * 5
+                    st.timer = 10 + rng.nextFloat() * 10
                     st.intensity = 0.5 + rng.nextFloat() * 0.5
                 } else {
-                    st.timer = 5 + rng.nextFloat() * 10
+                    st.timer = 1 + rng.nextFloat() * 1
                     st.intensity = 0
                     st.spawnAccum = 0
                 }
