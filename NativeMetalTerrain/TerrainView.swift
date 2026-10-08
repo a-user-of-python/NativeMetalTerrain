@@ -334,7 +334,7 @@ struct TerrainView: UIViewRepresentable {
             // Find safe spawn: search outward for land above sea level.
             // v1.3.0: after lava death, spawn away from volcanoes.
             if pendingAvoidVolcanoes {
-                playerPos = world.findSafeSpawnAwayFromVolcanoes()
+                playerPos = world.findSafeSpawn()
                 pendingAvoidVolcanoes = false
             } else {
                 playerPos = findSafeSpawn(in: world)
@@ -586,7 +586,7 @@ struct TerrainView: UIViewRepresentable {
                 // v1.3.0: lava death — torso-height check against live lava.
                 if !deathCooldown {
                     let torso = SIMD3<Float>(playerPos.x, groundY + 1.0, playerPos.y)
-                    if renderer.isLavaAt(torso) {
+                    // if renderer.isLavaAt(torso) { // volcano removed
                         deathCooldown = true
                         let handler = parent.onPlayerDeath
                         DispatchQueue.main.async { handler?() }
