@@ -182,7 +182,7 @@ public final class MTTerrainWorld {
         return vents
     }
 
-    /// Finds up to 3 volcano candidates: local maxima above 0.75
+    /// Finds up to 3 volcano candidates: local maxima above 0.55
     /// normalized height with topographic prominence (surroundings
     /// significantly lower), well separated from each other.
     private func computeVolcanoVents() -> [MTVolcanoVent] {
@@ -205,7 +205,7 @@ public final class MTTerrainWorld {
         for j in 1..<(n - 1) {
             for i in 1..<(n - 1) {
                 let h = grid[j * n + i]
-                guard h > 0.75 else { continue }
+                guard h > 0.55 else { continue }
                 var isMax = true
                 for dj in -1...1 {
                     for di in -1...1 {
