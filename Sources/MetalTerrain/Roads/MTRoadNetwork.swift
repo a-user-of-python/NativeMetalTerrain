@@ -159,12 +159,17 @@ public class MTRoadNetwork {
             let t = dot(c, hw.dir)
             tMin = min(tMin, t); tMax = max(tMax, t)
         }
+        // Safety: clamp range to prevent runaway loops.
+        if !tMin.isFinite || !tMax.isFinite { return nil }
+        if tMax - tMin > 50000 { return nil }
         // Also require the lateral offset to plausibly reach the bounds:
         // check perpendicular distance of the curve's centerline band.
         tMin -= 100; tMax += 100
         var pts: [SIMD2<Float>] = []
         var t = tMin
-        while t <= tMax {
+        var iter = 0
+        while t <= tMax && iter < 3000 {
+            iter += 1
             let p = hw.position(t: t)
             if p.x >= b.minX && p.x <= b.maxX && p.y >= b.minZ && p.y <= b.maxZ {
                 pts.append(p)
@@ -211,12 +216,16 @@ public class MTRoadNetwork {
         let rhsX = b.normal.x * b.baseOffset - a.normal.x * a.baseOffset
         let rhsY = b.normal.y * b.baseOffset - a.normal.y * a.baseOffset
         let ta = (rhsX * (-b.dir.y) - rhsY * (-b.dir.x)) / d
+        // Safety: if ta is NaN/infinite, no crossings.
+        guard ta.isFinite else { return [] }
         // Search ta ± 4000m for actual curve crossings (coarse then refine).
         var found: [SIMD2<Float>] = []
         var t = ta - 4000
         var prevDist = Float.greatestFiniteMagnitude
         var prevT = t
-        while t <= ta + 4000 {
+        var iter = 0
+        while t <= ta + 4000 && iter < 250 {
+            iter += 1
             let pa = a.position(t: t)
             // For highway b, find tb minimizing |b.position(tb) - pa| via a few Newton-ish steps.
             var tb = dot(pa, b.dir)
